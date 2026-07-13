@@ -1,14 +1,16 @@
 :root {
   color-scheme: dark;
-  --bg: #14161a;
-  --panel: #1d2026;
-  --panel-2: #22262e;
-  --text: #e8eaee;
-  --muted: #9aa1ac;
-  --accent: #5b9dd9;
-  --danger: #d95b5b;
-  --ok: #62b46a;
-  --border: #2e333c;
+  /* Brand palette from assets/basementenlogob.png: black + #F9EC07. */
+  --bg: #0a0a0a;
+  --panel: #141412;
+  --panel-2: #1e1e1a;
+  --text: #f2f0e4;
+  --muted: #9c9a8c;
+  --accent: #f9ec07;
+  --accent-ink: #000000;
+  --danger: #e25563;
+  --ok: #7dc46e;
+  --border: #2c2c26;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -47,7 +49,7 @@ button {
   padding: 0.5rem 0.9rem; font-size: 0.9rem; cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #0c1015; font-weight: 600; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
 button.linklike { background: none; border: none; color: var(--accent); padding: 0.4rem 0; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -144,3 +146,6 @@ dialog::backdrop { background: rgba(0,0,0,0.55); }
 
 hr.sep { border: none; border-top: 1px solid var(--border); margin: 1.2rem 0; }
 dialog h2 { font-size: 1.05rem; margin: 0.2rem 0 0.4rem; }
+
+.brand-mark { display: block; height: 72px; margin: 0 auto 0.8rem; }
+.topbar .brand-mark { height: 26px; margin: 0; }
