@@ -1,0 +1,31 @@
+[package]
+name = "desktop-core"
+version = "0.1.0"
+description = "Desktop client core for Basementen Vault: local replica, API client, session, generator"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vault-core = { path = "../../core/vault-core" }
+vault-sync = { path = "../../core/vault-sync" }
+
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+rand = "0.8"
+thiserror = "2"
+uuid = { version = "1", features = ["v7"] }
+zeroize = "1"
+
+[dev-dependencies]
+vault-server = { path = "../../server/vault-server" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+axum = "0.8"
+tempfile = "3"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+
+[lints]
+workspace = true

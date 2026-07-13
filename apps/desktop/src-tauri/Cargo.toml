@@ -1,0 +1,25 @@
+[package]
+name = "basementen-vault-desktop"
+version = "0.1.0"
+description = "Basementen Vault desktop app"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+desktop-core = { path = "../../desktop-core" }
+vault-core = { path = "../../../core/vault-core" }
+vault-sync = { path = "../../../core/vault-sync" }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+uuid = { version = "1", features = ["v7"] }
+
+[lints]
+workspace = true

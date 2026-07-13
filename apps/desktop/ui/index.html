@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Basementen Vault</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Setup: first run, no account on this device -->
+  <section id="screen-setup" class="screen" hidden>
+    <div class="card narrow">
+      <h1>Basementen Vault</h1>
+      <p class="muted">Connect to your self-hosted vault server.</p>
+      <label>Server URL
+        <input id="setup-server" type="url" placeholder="https://vault.example.com" autocomplete="off" />
+      </label>
+      <div class="tabs">
+        <button id="tab-login" class="tab active">Log in</button>
+        <button id="tab-register" class="tab">Create account</button>
+      </div>
+      <label>E-mail
+        <input id="setup-email" type="email" autocomplete="username" />
+      </label>
+      <label>Master password
+        <input id="setup-password" type="password" autocomplete="off" />
+      </label>
+      <label id="row-password2" hidden>Repeat master password
+        <input id="setup-password2" type="password" autocomplete="off" />
+      </label>
+      <label id="row-totp" >Two-factor code <span class="muted">(if enabled)</span>
+        <input id="setup-totp" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" />
+      </label>
+      <p id="setup-error" class="error" role="alert"></p>
+      <button id="setup-submit" class="primary">Log in</button>
+      <p class="muted small">Your master password never leaves this device. If you
+        forget it, only your Recovery Kit can restore your vault.</p>
+    </div>
+  </section>
+
+  <!-- Recovery kit: shown exactly once after registration -->
+  <section id="screen-recovery" class="screen" hidden>
+    <div class="card narrow">
+      <h1>Your Recovery Kit</h1>
+      <p>This code is the <strong>only</strong> way to recover your vault if you
+        forget your master password. Print it or write it down and store it
+        somewhere safe. It will never be shown again.</p>
+      <pre id="recovery-code" class="recovery-code"></pre>
+      <button id="recovery-copy">Copy code</button>
+      <label class="check"><input id="recovery-ack" type="checkbox" />
+        I have stored my Recovery Kit somewhere safe</label>
+      <p class="muted">Next: open the verification link we e-mailed you, then log in.</p>
+      <button id="recovery-done" class="primary" disabled>Continue to login</button>
+    </div>
+  </section>
+
+  <!-- Unlock: account cached locally, vault locked -->
+  <section id="screen-unlock" class="screen" hidden>
+    <div class="card narrow">
+      <h1>Vault locked</h1>
+      <p class="muted" id="unlock-email"></p>
+      <label>Master password
+        <input id="unlock-password" type="password" autocomplete="off" autofocus />
+      </label>
+      <p id="unlock-error" class="error" role="alert"></p>
+      <button id="unlock-submit" class="primary">Unlock</button>
+      <button id="unlock-switch" class="linklike">Use a different account…</button>
+    </div>
+  </section>
+
+  <!-- Vault: unlocked -->
+  <section id="screen-vault" class="screen" hidden>
+    <header class="topbar">
+      <strong>Basementen Vault</strong>
+      <input id="search" type="search" placeholder="Search vault…" />
+      <span id="sync-status" class="muted small"></span>
+      <button id="btn-sync" title="Sync now">⟳ Sync</button>
+      <button id="btn-new">＋ New item</button>
+      <button id="btn-lock" title="Lock vault">🔒 Lock</button>
+    </header>
+    <main class="split">
+      <ul id="item-list" class="item-list"></ul>
+      <section id="detail" class="detail">
+        <p class="muted center" id="detail-empty">Select an item, or create a new one.</p>
+        <form id="editor" hidden>
+          <div class="row">
+            <label>Type
+              <select id="f-type">
+                <option value="login">Login</option>
+                <option value="note">Secure note</option>
+                <option value="card">Card</option>
+              </select>
+            </label>
+            <label class="grow">Name <input id="f-name" required /></label>
+          </div>
+          <div data-kinds="login" class="kind-fields">
+            <label>Username <span class="withcopy"><input id="f-username" />
+              <button type="button" class="copy" data-copy="f-username">Copy</button></span></label>
+            <label>Password <span class="withcopy">
+              <input id="f-password" type="password" />
+              <button type="button" id="btn-reveal">👁</button>
+              <button type="button" class="copy" data-copy="f-password">Copy</button>
+              <button type="button" id="btn-generate">Generate</button></span></label>
+            <label>URL <input id="f-url" type="url" /></label>
+          </div>
+          <div data-kinds="card" class="kind-fields" hidden>
+            <label>Cardholder <input id="f-cardholder" /></label>
+            <div class="row">
+              <label class="grow">Number <span class="withcopy"><input id="f-number" />
+                <button type="button" class="copy" data-copy="f-number">Copy</button></span></label>
+              <label>Expiry <input id="f-expiry" placeholder="MM/YY" /></label>
+              <label>Code <input id="f-code" /></label>
+            </div>
+          </div>
+          <label>Notes <textarea id="f-notes" rows="5"></textarea></label>
+          <label>Tags <span class="muted small">(comma separated)</span> <input id="f-tags" /></label>
+          <div class="row">
+            <button type="submit" class="primary">Save</button>
+            <button type="button" id="btn-delete" class="danger" hidden>Delete</button>
+            <span id="editor-error" class="error"></span>
+          </div>
+        </form>
+      </section>
+    </main>
+  </section>
+
+  <!-- Password generator dialog -->
+  <dialog id="gen-dialog">
+    <h2>Generate password</h2>
+    <output id="gen-output" class="gen-output"></output>
+    <div class="gen-meter"><div id="gen-meter-fill"></div></div>
+    <p class="muted small"><span id="gen-entropy"></span> bits of entropy</p>
+    <label>Length <span id="gen-length-label">20</span>
+      <input id="gen-length" type="range" min="8" max="64" value="20" /></label>
+    <label class="check"><input id="gen-lower" type="checkbox" checked /> lowercase</label>
+    <label class="check"><input id="gen-upper" type="checkbox" checked /> UPPERCASE</label>
+    <label class="check"><input id="gen-digits" type="checkbox" checked /> digits</label>
+    <label class="check"><input id="gen-symbols" type="checkbox" checked /> symbols</label>
+    <label class="check"><input id="gen-ambiguous" type="checkbox" /> exclude ambiguous (Il1O0o)</label>
+    <div class="row">
+      <button id="gen-again">Regenerate</button>
+      <button id="gen-use" class="primary">Use password</button>
+      <button id="gen-close">Close</button>
+    </div>
+  </dialog>
+
+  <script src="main.js" defer></script>
+</body>
+</html>
