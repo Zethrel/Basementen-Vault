@@ -179,6 +179,12 @@ function clearEditor() {
   $("editor-error").textContent = "";
 }
 
+function showDetailPane(show) {
+  document.querySelector(".split").classList.toggle("show-detail", show);
+  $("btn-back").hidden = !show;
+}
+$("btn-back").addEventListener("click", () => showDetailPane(false));
+
 $("btn-new").addEventListener("click", () => {
   selectedId = null;
   clearEditor();
@@ -186,6 +192,7 @@ $("btn-new").addEventListener("click", () => {
   $("btn-delete").hidden = true;
   $("detail-empty").hidden = true;
   $("editor").hidden = false;
+  showDetailPane(true);
   $("f-name").focus();
   renderList();
 });
@@ -211,6 +218,7 @@ async function openItem(id) {
   $("btn-delete").hidden = false;
   $("detail-empty").hidden = true;
   $("editor").hidden = false;
+  showDetailPane(true);
   renderList();
 }
 
@@ -250,6 +258,7 @@ $("btn-delete").addEventListener("click", async () => {
   clearEditor();
   $("editor").hidden = true;
   $("detail-empty").hidden = false;
+  showDetailPane(false);
   await renderList();
 });
 

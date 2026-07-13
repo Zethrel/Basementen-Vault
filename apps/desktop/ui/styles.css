@@ -97,6 +97,28 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .withcopy { display: flex; gap: 0.4rem; align-items: center; }
 .withcopy input { flex: 1; }
 
+.backbtn { margin-bottom: 0.8rem; }
+
+/* Phone layout: the list fills the screen; opening an item slides the
+   detail pane over it, with a back button. Touch targets grow. */
+@media (max-width: 700px) {
+  .split { position: relative; }
+  .item-list { width: 100%; border-right: none; }
+  .item-list li { padding: 0.9rem 0.8rem; }
+  .detail {
+    position: absolute; inset: 0; background: var(--bg);
+    display: none; padding: 1rem;
+  }
+  .split.show-detail .detail { display: block; }
+  .split.show-detail .item-list { display: none; }
+  .topbar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; padding: 0.6rem; }
+  .topbar strong, #sync-status { display: none; }
+  .topbar button { min-width: 0; padding: 0.65rem 0.2rem; font-size: 0.85rem; }
+  .topbar input[type="search"] { grid-column: 1 / -1; order: 10; }
+  button { padding: 0.65rem 1rem; }
+  input, select, textarea { font-size: 1rem; padding: 0.7rem 0.8rem; }
+}
+
 dialog {
   background: var(--panel); color: var(--text);
   border: 1px solid var(--border); border-radius: 12px;

@@ -230,7 +230,7 @@ avoids re-implementing crypto five times.
 |-------|--------|-----------|
 | **Core library** (crypto, vault model, sync engine) | **Rust** (`argon2`, `chacha20poly1305`, `hkdf`, `zeroize` crates — all RustCrypto, widely audited) | Memory safety for key handling, `zeroize` for scrubbing secrets, compiles to every target incl. iOS/Android (via UniFFI) and WASM |
 | Desktop apps (Win/macOS/Linux) | **Tauri** (Rust backend = the core lib, web UI) | Single codebase, small binaries, direct in-process use of the core |
-| Mobile apps (iOS/Android) | **Flutter** or **Kotlin Multiplatform** binding the Rust core via UniFFI | Native biometric APIs (Face ID / BiometricPrompt), autofill service integration |
+| Mobile apps (iOS/Android) | **Tauri 2 mobile** — the same app as desktop (revised from Flutter/KMP) | One codebase for all five platforms; the Rust core runs in-process; see `docs/MOBILE.md` |
 | Server | **Rust (axum)** or **Go** | Stateless API + PostgreSQL; the server does little, so pick team familiarity |
 | Database | **PostgreSQL** | Row-level per-user isolation, proven operational story |
 | Client local store | SQLite (ciphertext-only rows) | Offline-first replica |
