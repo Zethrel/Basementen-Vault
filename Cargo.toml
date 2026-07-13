@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["core/vault-core"]
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Zethrel/Basementen-Vault"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = true
+codegen-units = 1
