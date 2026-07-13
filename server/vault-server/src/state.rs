@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use sqlx::SqlitePool;
+use tokio::sync::broadcast;
 
 use crate::config::Config;
 use crate::error::ApiError;
@@ -11,12 +13,37 @@ use crate::mailer::Mailer;
 use crate::rate_limit::IpLimiter;
 use crate::security;
 
+/// Per-account change notification fan-out. Carries only the new sequence
+/// number — "something changed, pull now" — never data.
+#[derive(Default)]
+pub struct ChangeNotifier {
+    channels: Mutex<HashMap<i64, broadcast::Sender<i64>>>,
+}
+
+impl ChangeNotifier {
+    pub fn subscribe(&self, account_id: i64) -> broadcast::Receiver<i64> {
+        let mut map = self.channels.lock().expect("notifier mutex poisoned");
+        map.entry(account_id)
+            .or_insert_with(|| broadcast::channel(16).0)
+            .subscribe()
+    }
+
+    pub fn notify(&self, account_id: i64, seq: i64) {
+        let map = self.channels.lock().expect("notifier mutex poisoned");
+        if let Some(tx) = map.get(&account_id) {
+            // Nobody listening is fine; the receiver count just hits zero.
+            let _ = tx.send(seq);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
     pub cfg: Arc<Config>,
     pub mailer: Arc<Mailer>,
     pub ip_limiter: Arc<IpLimiter>,
+    pub notifier: Arc<ChangeNotifier>,
     /// Random-credential hash verified for unknown accounts so login cost is
     /// identical whether or not an e-mail exists.
     pub dummy_hash: Arc<String>,
@@ -29,6 +56,7 @@ impl AppState {
             cfg: Arc::new(cfg),
             mailer: Arc::new(mailer),
             ip_limiter: Arc::new(IpLimiter::default()),
+            notifier: Arc::new(ChangeNotifier::default()),
             dummy_hash: Arc::new(security::make_dummy_hash()),
         }
     }

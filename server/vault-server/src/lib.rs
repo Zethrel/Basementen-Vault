@@ -16,7 +16,7 @@ pub mod security;
 pub mod state;
 pub mod totp;
 
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::Router;
 
 use crate::state::AppState;
@@ -40,5 +40,11 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route("/api/v1/mfa/totp/disable", post(routes::mfa::totp_disable))
         .route("/api/v1/vault/keys", get(routes::vault::get_keys))
+        .route("/api/v1/vault/items", get(routes::items::list_items))
+        .route(
+            "/api/v1/vault/items/{item_id}",
+            put(routes::items::put_item).delete(routes::items::delete_item),
+        )
+        .route("/api/v1/vault/events", get(routes::items::events))
         .with_state(state)
 }

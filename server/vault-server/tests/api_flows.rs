@@ -473,3 +473,101 @@ async fn expired_verification_token_is_rejected() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+// ---------------------------------------------------------------------------
+// Vault items (protocol edge cases; full sync behaviour is tested in the
+// vault-sync crate against this same server).
+
+#[tokio::test]
+async fn item_envelope_is_validated() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (_, body) = login(&server, &reg, json!({})).await;
+    let access = body["access_token"].as_str().unwrap().to_string();
+
+    let item = reg
+        .secrets
+        .vault_key
+        .encrypt_item("item-1", 1, b"x")
+        .unwrap();
+
+    // Envelope id must match the URL path.
+    let (status, _) = server
+        .request(
+            "PUT",
+            "/api/v1/vault/items/other-id",
+            Some(&access),
+            Some(serde_json::to_value(&item).unwrap()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Garbage body is rejected.
+    let (status, _) = server
+        .request(
+            "PUT",
+            "/api/v1/vault/items/item-1",
+            Some(&access),
+            Some(json!({ "not": "an envelope" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Valid write succeeds and bumps the account seq.
+    let (status, body) = server
+        .request(
+            "PUT",
+            "/api/v1/vault/items/item-1",
+            Some(&access),
+            Some(serde_json::to_value(&item).unwrap()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["revision"], 1);
+    assert_eq!(body["seq"], 1);
+
+    // Stale write (same revision again) conflicts and returns current state.
+    let (status, body) = server
+        .request(
+            "PUT",
+            "/api/v1/vault/items/item-1",
+            Some(&access),
+            Some(serde_json::to_value(&item).unwrap()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["current"]["revision"], 1);
+}
+
+#[tokio::test]
+async fn writes_nudge_change_subscribers() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (_, body) = login(&server, &reg, json!({})).await;
+    let access = body["access_token"].as_str().unwrap().to_string();
+
+    // Subscribe the way the SSE handler does, then write.
+    let account_id: i64 = sqlx::query_scalar("SELECT id FROM accounts LIMIT 1")
+        .fetch_one(&server.state.db)
+        .await
+        .unwrap();
+    let mut rx = server.state.notifier.subscribe(account_id);
+
+    let item = reg
+        .secrets
+        .vault_key
+        .encrypt_item("item-1", 1, b"x")
+        .unwrap();
+    let (status, _) = server
+        .request(
+            "PUT",
+            "/api/v1/vault/items/item-1",
+            Some(&access),
+            Some(serde_json::to_value(&item).unwrap()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let seq = rx.try_recv().expect("a change nudge should have been sent");
+    assert_eq!(seq, 1);
+}
