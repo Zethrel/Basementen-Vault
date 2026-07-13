@@ -309,7 +309,13 @@ recommendation and the rest of this plan assumes it.
 
 - Sharing vaults / organizations / emergency access contacts
 - Browser extension (planned v2 — it has its own large attack surface)
-- Self-hosting packaging, SSO login, hardware-key-only accounts
+- SSO login, hardware-key-only accounts
+
+**In scope (revised):** self-hosting is the primary deployment model — the
+server ships as a single binary / Docker container with SQLite by default
+(see `docs/SELF_HOSTING.md`); PostgreSQL support can come later if needed.
+Sessions use opaque rotating bearer tokens stored hashed server-side instead
+of JWT/PASETO: fully revocable and one less signing key to manage.
 - Secrets other than logins/notes/cards (SSH keys, TOTP-storage-in-vault)
 
 ---

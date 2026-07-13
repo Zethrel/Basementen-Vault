@@ -1,0 +1,17 @@
+# Basementen Vault — self-hosted stack.
+# Copy .env.example to .env, fill it in, then: docker compose up -d
+services:
+  vault:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - vault-data:/data
+    # Bind only to localhost; expose it via your reverse proxy or VPN.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  vault-data:
