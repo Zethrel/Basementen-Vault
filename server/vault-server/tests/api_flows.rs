@@ -36,6 +36,7 @@ async fn test_server() -> TestServer {
         base_url: "http://vault.test".into(),
         registration_open: true,
         trust_proxy: false,
+        recovery_cooloff_secs: 72 * 3600,
         mail: MailConfig::Console,
     };
     let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new())));
@@ -102,6 +103,8 @@ fn client_bundle(email: &str, password: &str) -> (vault_core::account::Registrat
         "email": email,
         "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(reg.bundle.auth_credential),
+        "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(reg.bundle.recovery_verifier),
         "kdf_params": reg.bundle.kdf_params,
         "master_wrapped_vault_key": serde_json::to_value(&reg.bundle.master_wrapped_vault_key).unwrap(),
         "recovery_wrapped_vault_key": serde_json::to_value(&reg.bundle.recovery_wrapped_vault_key).unwrap(),

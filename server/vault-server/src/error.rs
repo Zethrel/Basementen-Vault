@@ -32,6 +32,10 @@ pub enum ApiError {
     #[error("invalid or expired token")]
     InvalidToken,
 
+    /// Recovery cooling-off period has not elapsed yet.
+    #[error("recovery is in its cooling-off period")]
+    CoolingOff { retry_after_secs: i64 },
+
     #[error("not found")]
     NotFound,
 
@@ -49,6 +53,7 @@ impl ApiError {
             ApiError::LockedOut { .. } => "locked_out",
             ApiError::RateLimited { .. } => "rate_limited",
             ApiError::InvalidToken => "invalid_token",
+            ApiError::CoolingOff { .. } => "cooling_off",
             ApiError::NotFound => "not_found",
             ApiError::Internal => "internal",
         }
@@ -63,6 +68,7 @@ impl ApiError {
             ApiError::LockedOut { .. } | ApiError::RateLimited { .. } => {
                 StatusCode::TOO_MANY_REQUESTS
             }
+            ApiError::CoolingOff { .. } => StatusCode::TOO_EARLY,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -73,7 +79,8 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let retry_after = match &self {
             ApiError::LockedOut { retry_after_secs }
-            | ApiError::RateLimited { retry_after_secs } => Some(*retry_after_secs),
+            | ApiError::RateLimited { retry_after_secs }
+            | ApiError::CoolingOff { retry_after_secs } => Some(*retry_after_secs),
             _ => None,
         };
         let body = Json(json!({

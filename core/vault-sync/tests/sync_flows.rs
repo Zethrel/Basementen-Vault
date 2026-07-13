@@ -137,6 +137,7 @@ async fn bootstrap() -> TestAccount {
         base_url: "http://vault.test".into(),
         registration_open: true,
         trust_proxy: false,
+        recovery_cooloff_secs: 72 * 3600,
         mail: MailConfig::Console,
     };
     let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new())));
@@ -166,6 +167,8 @@ async fn bootstrap() -> TestAccount {
             "email": EMAIL,
             "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(reg.bundle.auth_credential),
+            "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(reg.bundle.recovery_verifier),
             "kdf_params": reg.bundle.kdf_params,
             "master_wrapped_vault_key": serde_json::to_value(&reg.bundle.master_wrapped_vault_key).unwrap(),
             "recovery_wrapped_vault_key": serde_json::to_value(&reg.bundle.recovery_wrapped_vault_key).unwrap(),
@@ -408,6 +411,8 @@ async fn accounts_are_isolated() {
                 "email": "other@example.com",
                 "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
                     .encode(reg2.bundle.auth_credential),
+                "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(reg2.bundle.recovery_verifier),
                 "kdf_params": reg2.bundle.kdf_params,
                 "master_wrapped_vault_key": serde_json::to_value(&reg2.bundle.master_wrapped_vault_key).unwrap(),
                 "recovery_wrapped_vault_key": serde_json::to_value(&reg2.bundle.recovery_wrapped_vault_key).unwrap(),
@@ -431,6 +436,8 @@ async fn accounts_are_isolated() {
                 "email": "other@example.com",
                 "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
                     .encode(reg2.bundle.auth_credential),
+                "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(reg2.bundle.recovery_verifier),
             })
             .to_string(),
         ))

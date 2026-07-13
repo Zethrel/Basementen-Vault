@@ -178,6 +178,7 @@ async fn spawn_server() -> (String, vault_server::state::AppState) {
         base_url: "http://vault.test".into(),
         registration_open: true,
         trust_proxy: false,
+        recovery_cooloff_secs: 72 * 3600,
         mail: vault_server::config::MailConfig::Console,
     };
     let state = vault_server::state::AppState::new(
@@ -285,4 +286,108 @@ async fn api_client_full_lifecycle() {
     // Logout kills the session.
     api.logout().await;
     assert!(sync(&mut vault, &mut api).await.is_err());
+}
+
+#[tokio::test]
+async fn api_client_recovery_lifecycle() {
+    let (base_url, state) = spawn_server().await;
+    let email = "recover-me@example.com";
+
+    let reg = vault_core::account::register(
+        "password before amnesia",
+        email,
+        vault_core::KdfParams::mobile_floor(),
+    )
+    .unwrap();
+    let mut api = ApiClient::new(&base_url);
+    api.register(email, &reg.bundle).await.unwrap();
+    sqlx::query("UPDATE accounts SET email_verified_at = 1")
+        .execute(&state.db)
+        .await
+        .unwrap();
+    api.login(
+        email,
+        reg.secrets.auth_key.to_server_credential(),
+        None,
+        None,
+        "d",
+    )
+    .await
+    .unwrap();
+
+    // Store an item, then "forget" the password.
+    let mut vault = SqliteVault::open_in_memory().unwrap();
+    let envelope = reg
+        .secrets
+        .vault_key
+        .encrypt_item("keepsake", 1, b"survives recovery")
+        .unwrap();
+    vault.stage(PendingOp::Upsert(envelope));
+    sync(&mut vault, &mut api).await.unwrap();
+
+    // Start recovery; pull the token out of the captured mail.
+    api.recovery_start(email).await.unwrap();
+    let mails = state.mailer.sent();
+    let body = &mails
+        .iter()
+        .rev()
+        .find(|m| m.body.contains("bvrec_"))
+        .unwrap()
+        .body;
+    let start = body.find("bvrec_").unwrap();
+    let token: String = body[start..].split_whitespace().next().unwrap().to_string();
+
+    // Cooling-off is enforced through the client error surface.
+    let err = api.recovery_data(&token).await.unwrap_err();
+    assert!(matches!(
+        err,
+        desktop_core::ApiError::CoolingOff { retry_after_secs } if retry_after_secs > 0
+    ));
+    sqlx::query("UPDATE recovery_requests SET usable_at = 0")
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+    // Recover with the kit, under a new password.
+    let data = api.recovery_data(&token).await.unwrap();
+    assert!(data.supports_data_recovery);
+    let new_reg = vault_core::account::recover_and_rekey(
+        &reg.recovery_code,
+        &data.recovery_wrapped_vault_key,
+        "password after recovery",
+        &data.email,
+        vault_core::KdfParams::mobile_floor(),
+    )
+    .unwrap();
+    api.recovery_complete(
+        &token,
+        &new_reg.bundle,
+        Some(new_reg.secrets.vault_key.recovery_verifier()),
+        false,
+    )
+    .await
+    .unwrap();
+
+    // Fresh login with the new password on a fresh device; data intact.
+    let mut api2 = ApiClient::new(&base_url);
+    api2.login(
+        email,
+        new_reg.secrets.auth_key.to_server_credential(),
+        None,
+        None,
+        "post-recovery",
+    )
+    .await
+    .unwrap();
+    let mut vault2 = SqliteVault::open_in_memory().unwrap();
+    sync(&mut vault2, &mut api2).await.unwrap();
+    let stored = vault2.get("keepsake").unwrap();
+    assert_eq!(
+        new_reg
+            .secrets
+            .vault_key
+            .decrypt_item(stored.content.as_ref().unwrap())
+            .unwrap(),
+        b"survives recovery"
+    );
 }

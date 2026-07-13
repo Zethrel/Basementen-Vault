@@ -368,6 +368,148 @@ async fn sync_now(ctx: Ctx<'_>) -> Result<SyncSummary, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Recovery & backup e-mail
+
+/// Kick off account recovery: the server e-mails instructions (with a
+/// cooling-off period) to the account's addresses.
+#[tauri::command]
+async fn recover_start(server_url: String, email: String) -> Result<String, String> {
+    let api = ApiClient::new(&server_url);
+    api.recovery_start(&email).await.map_err(err)?;
+    Ok(
+        "If that address has an account, recovery instructions were e-mailed. \
+        The recovery token becomes usable after the cooling-off period."
+            .into(),
+    )
+}
+
+#[derive(Serialize)]
+struct RecoverResult {
+    /// The NEW Recovery Kit code (the old kit is spent). Empty for wipes.
+    recovery_code: String,
+    data_preserved: bool,
+}
+
+/// Complete recovery with the e-mailed token. With a Recovery Kit code the
+/// vault is fully restored; with `wipe` (and no code) the account is reset
+/// and all stored items are destroyed.
+#[tauri::command]
+async fn recover_complete(
+    ctx: Ctx<'_>,
+    server_url: String,
+    token: String,
+    recovery_code: Option<String>,
+    new_password: String,
+    wipe: bool,
+) -> Result<RecoverResult, String> {
+    if new_password.chars().count() < 12 {
+        return Err("master password must be at least 12 characters".into());
+    }
+    let api = ApiClient::new(&server_url);
+    let data = api.recovery_data(&token).await.map_err(|e| match e {
+        desktop_core::ApiError::CoolingOff { retry_after_secs } => format!(
+            "this recovery is still in its cooling-off period — usable in about {} hours",
+            (retry_after_secs + 3599) / 3600
+        ),
+        other => other.to_string(),
+    })?;
+
+    let (new_reg, preserved) = match recovery_code {
+        Some(code) if !code.trim().is_empty() => {
+            let reg = vault_core::account::recover_and_rekey(
+                &code,
+                &data.recovery_wrapped_vault_key,
+                &new_password,
+                &data.email,
+                vault_core::KdfParams::desktop(),
+            )
+            .map_err(|_| "recovery failed — check the Recovery Kit code for typos".to_string())?;
+            let verifier = reg.secrets.vault_key.recovery_verifier();
+            api.recovery_complete(&token, &reg.bundle, Some(verifier), false)
+                .await
+                .map_err(err)?;
+            (reg, true)
+        }
+        _ if wipe => {
+            let reg = vault_core::account::register(
+                &new_password,
+                &data.email,
+                vault_core::KdfParams::desktop(),
+            )
+            .map_err(err)?;
+            api.recovery_complete(&token, &reg.bundle, None, true)
+                .await
+                .map_err(err)?;
+            (reg, false)
+        }
+        _ => {
+            return Err("enter your Recovery Kit code, or explicitly choose the \
+                        reset-and-wipe option"
+                .into())
+        }
+    };
+
+    // The local replica belongs to the pre-recovery account state; start
+    // clean and let the first login resync (or stay empty after a wipe).
+    if let Ok(mut vault) = SqliteVault::open(&ctx.db_path) {
+        vault.clear_items();
+        vault.set_last_seq(0);
+        let _ = vault.set_encrypted_refresh_token(None);
+    }
+
+    Ok(RecoverResult {
+        recovery_code: new_reg.recovery_code.to_string(),
+        data_preserved: preserved,
+    })
+}
+
+/// Set or replace the trusted backup e-mail (fresh password + TOTP gated).
+#[tauri::command]
+async fn set_backup_email(
+    ctx: Ctx<'_>,
+    password: String,
+    totp_code: Option<String>,
+    backup_email: String,
+) -> Result<String, String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let meta = unlocked.vault.account_meta().ok_or("no account metadata")?;
+    let credential =
+        vault_core::account::login_credential(&password, &meta.email, &meta.kdf_params)
+            .map_err(err)?
+            .to_server_credential();
+    unlocked
+        .api
+        .set_backup_email(credential, totp_code.as_deref(), &backup_email)
+        .await
+        .map_err(err)?;
+    Ok("Verification e-mail sent to the backup address.".into())
+}
+
+/// Remove the trusted backup e-mail (fresh password + TOTP gated).
+#[tauri::command]
+async fn remove_backup_email(
+    ctx: Ctx<'_>,
+    password: String,
+    totp_code: Option<String>,
+) -> Result<(), String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let meta = unlocked.vault.account_meta().ok_or("no account metadata")?;
+    let credential =
+        vault_core::account::login_credential(&password, &meta.email, &meta.kdf_params)
+            .map_err(err)?
+            .to_server_credential();
+    unlocked
+        .api
+        .remove_backup_email(credential, totp_code.as_deref())
+        .await
+        .map_err(err)
+}
+
+// ---------------------------------------------------------------------------
 // Generator & clipboard
 
 #[derive(Serialize)]
@@ -446,6 +588,10 @@ pub fn run() {
             sync_now,
             generate,
             copy_secret,
+            recover_start,
+            recover_complete,
+            set_backup_email,
+            remove_backup_email,
         ])
         .run(tauri::generate_context!())
         .expect("error while running application");

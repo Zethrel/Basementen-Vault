@@ -10,6 +10,7 @@ pub const KEY_LEN: usize = 32;
 /// breaking change to every existing vault; never reuse a label.
 const INFO_AUTH: &[u8] = b"basementen-vault/v1/auth-key";
 const INFO_WRAP: &[u8] = b"basementen-vault/v1/wrapping-key";
+const INFO_RECOVERY_VERIFIER: &[u8] = b"basementen-vault/v1/recovery-verifier";
 
 macro_rules! key_type {
     ($(#[$doc:meta])* $name:ident) => {
@@ -98,6 +99,22 @@ impl VaultKey {
         let mut bytes = [0u8; KEY_LEN];
         OsRng.fill_bytes(&mut bytes);
         Self(bytes)
+    }
+
+    /// Recovery verifier: a value derivable only by someone who holds the
+    /// Vault Key (i.e. someone who unwrapped it with the Recovery Kit).
+    /// The server stores its hash at registration and demands the preimage
+    /// to complete a data-preserving recovery, so e-mail access alone can
+    /// never take over an account while keeping its vault.
+    ///
+    /// One-way HKDF branch: revealing it to the server leaks nothing about
+    /// the Vault Key itself.
+    pub fn recovery_verifier(&self) -> [u8; KEY_LEN] {
+        let hk = Hkdf::<Sha256>::new(None, self.as_bytes());
+        let mut out = [0u8; KEY_LEN];
+        hk.expand(INFO_RECOVERY_VERIFIER, &mut out)
+            .expect("32 bytes is a valid HKDF-SHA256 output length");
+        out
     }
 }
 

@@ -16,6 +16,9 @@ pub struct RegisterRequest {
     /// base64url of the 32-byte client AuthKey.
     pub auth_credential: String,
     pub kdf_params: KdfParams,
+    /// base64url of the 32-byte recovery verifier (HKDF branch of the
+    /// Vault Key); stored hashed, demanded for data-preserving recovery.
+    pub recovery_verifier: String,
     /// Opaque WrappedKey JSON blobs; the server stores, never inspects.
     pub master_wrapped_vault_key: Value,
     pub recovery_wrapped_vault_key: Value,
@@ -64,6 +67,7 @@ pub async fn register(
     let email = vault_core::kdf::normalize_email(&req.email);
     validate_email(&email)?;
     let credential = decode_credential(&req.auth_credential)?;
+    let verifier = decode_credential(&req.recovery_verifier)?;
     req.kdf_params
         .validate()
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
@@ -91,14 +95,16 @@ pub async fn register(
     let hash = security::hash_credential(&credential);
     let account_id: i64 = sqlx::query_scalar(
         "INSERT INTO accounts (email, server_auth_hash, kdf_params,
-                               master_wrapped_vault_key, recovery_wrapped_vault_key, created_at)
-         VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                               master_wrapped_vault_key, recovery_wrapped_vault_key,
+                               recovery_verifier_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&email)
     .bind(&hash)
     .bind(serde_json::to_string(&req.kdf_params).map_err(|_| ApiError::Internal)?)
     .bind(req.master_wrapped_vault_key.to_string())
     .bind(req.recovery_wrapped_vault_key.to_string())
+    .bind(security::sha256(&verifier))
     .bind(now)
     .fetch_one(&state.db)
     .await?;

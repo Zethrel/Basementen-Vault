@@ -17,6 +17,10 @@ pub struct Config {
     /// Trust `X-Forwarded-For` from a reverse proxy. Only enable when the
     /// server is reachable exclusively through your proxy. Env: `BV_TRUST_PROXY`.
     pub trust_proxy: bool,
+    /// Cooling-off delay before a recovery request becomes usable.
+    /// Env: `BV_RECOVERY_COOLOFF_HOURS` (default 72). The delay is the
+    /// account owner's window to cancel a recovery they didn't start.
+    pub recovery_cooloff_secs: i64,
     pub mail: MailConfig,
 }
 
@@ -57,6 +61,11 @@ impl Config {
         let trust_proxy = env("BV_TRUST_PROXY")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
+        let recovery_cooloff_secs = env("BV_RECOVERY_COOLOFF_HOURS")
+            .map(|v| v.parse::<i64>().map(|h| h * 3600))
+            .transpose()
+            .map_err(|e| format!("BV_RECOVERY_COOLOFF_HOURS: {e}"))?
+            .unwrap_or(72 * 3600);
 
         let mail = match env("BV_MAILER").as_deref() {
             None | Some("console") => MailConfig::Console,
@@ -82,6 +91,7 @@ impl Config {
             base_url,
             registration_open,
             trust_proxy,
+            recovery_cooloff_secs,
             mail,
         })
     }

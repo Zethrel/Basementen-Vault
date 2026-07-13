@@ -18,6 +18,8 @@ pub enum ApiError {
     MfaRequired,
     #[error("too many attempts — try again in {retry_after_secs}s")]
     RateLimited { retry_after_secs: i64 },
+    #[error("recovery cooling-off: usable in {retry_after_secs}s")]
+    CoolingOff { retry_after_secs: i64 },
     #[error("session expired — log in again")]
     SessionExpired,
     #[error("server error: {0}")]
@@ -35,6 +37,15 @@ pub struct LoginOutcome {
     pub refresh_token: String,
     pub kdf_params: KdfParams,
     pub master_wrapped_vault_key: WrappedKey,
+}
+
+/// Debug omits the wrapped key blob (it's ciphertext, but no need to log it).
+#[derive(Debug)]
+pub struct RecoveryData {
+    pub email: String,
+    pub kdf_params: KdfParams,
+    pub recovery_wrapped_vault_key: WrappedKey,
+    pub supports_data_recovery: bool,
 }
 
 pub struct ApiClient {
@@ -82,6 +93,9 @@ impl ApiClient {
             "locked_out" | "rate_limited" => ApiError::RateLimited {
                 retry_after_secs: body["retry_after_secs"].as_i64().unwrap_or(60),
             },
+            "cooling_off" => ApiError::CoolingOff {
+                retry_after_secs: body["retry_after_secs"].as_i64().unwrap_or(0),
+            },
             "invalid_credentials" => ApiError::InvalidCredentials,
             "invalid_token" => ApiError::SessionExpired,
             _ => ApiError::Server(format!("{status}: {code}")),
@@ -113,6 +127,7 @@ impl ApiClient {
             .json(&json!({
                 "email": email,
                 "auth_credential": b64(bundle.auth_credential),
+                "recovery_verifier": b64(bundle.recovery_verifier),
                 "kdf_params": bundle.kdf_params,
                 "master_wrapped_vault_key": bundle.master_wrapped_vault_key,
                 "recovery_wrapped_vault_key": bundle.recovery_wrapped_vault_key,
@@ -217,6 +232,134 @@ impl ApiClient {
         }
         self.access_token = None;
         self.refresh_token = None;
+    }
+
+    // --- recovery --------------------------------------------------------
+
+    pub async fn recovery_start(&self, email: &str) -> Result<(), ApiError> {
+        let resp = self
+            .http
+            .post(self.url("/api/v1/accounts/recovery/start"))
+            .json(&json!({ "email": email }))
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            Err(Self::classify(status, &body))
+        }
+    }
+
+    pub async fn recovery_data(&self, token: &str) -> Result<RecoveryData, ApiError> {
+        let resp = self
+            .http
+            .get(self.url("/api/v1/accounts/recovery/data"))
+            .query(&[("token", token)])
+            .send()
+            .await?;
+        let status = resp.status();
+        let body: Value = resp.json().await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        Ok(RecoveryData {
+            email: body["email"]
+                .as_str()
+                .ok_or_else(|| ApiError::Server("missing email".into()))?
+                .to_string(),
+            kdf_params: serde_json::from_value(body["kdf_params"].clone())
+                .map_err(|e| ApiError::Server(e.to_string()))?,
+            recovery_wrapped_vault_key: serde_json::from_value(
+                body["recovery_wrapped_vault_key"].clone(),
+            )
+            .map_err(|e| ApiError::Server(e.to_string()))?,
+            supports_data_recovery: body["supports_data_recovery"].as_bool().unwrap_or(false),
+        })
+    }
+
+    /// Complete a recovery. `verifier` proves Recovery Kit possession
+    /// (data-preserving); `wipe` is the explicit no-kit reset path.
+    pub async fn recovery_complete(
+        &self,
+        token: &str,
+        bundle: &vault_core::RegistrationBundle,
+        verifier: Option<[u8; 32]>,
+        wipe: bool,
+    ) -> Result<(), ApiError> {
+        let resp = self
+            .http
+            .post(self.url("/api/v1/accounts/recovery/complete"))
+            .json(&json!({
+                "token": token,
+                "recovery_verifier": verifier.map(b64),
+                "wipe": wipe,
+                "auth_credential": b64(bundle.auth_credential),
+                "kdf_params": bundle.kdf_params,
+                "master_wrapped_vault_key": bundle.master_wrapped_vault_key,
+                "recovery_wrapped_vault_key": bundle.recovery_wrapped_vault_key,
+                "new_recovery_verifier": b64(bundle.recovery_verifier),
+            }))
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            Err(Self::classify(status, &body))
+        }
+    }
+
+    // --- backup e-mail -----------------------------------------------------
+
+    pub async fn set_backup_email(
+        &mut self,
+        auth_credential: [u8; 32],
+        totp_code: Option<&str>,
+        backup_email: &str,
+    ) -> Result<(), ApiError> {
+        let payload = json!({
+            "auth_credential": b64(auth_credential),
+            "totp_code": totp_code,
+            "backup_email": backup_email,
+        });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.post(format!("{base}/api/v1/account/backup-email"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
+    }
+
+    pub async fn remove_backup_email(
+        &mut self,
+        auth_credential: [u8; 32],
+        totp_code: Option<&str>,
+    ) -> Result<(), ApiError> {
+        let payload = json!({
+            "auth_credential": b64(auth_credential),
+            "totp_code": totp_code,
+        });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.delete(format!("{base}/api/v1/account/backup-email"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
     }
 
     // --- authed requests with one automatic refresh-and-retry -----------

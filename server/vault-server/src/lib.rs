@@ -46,5 +46,29 @@ pub fn build_app(state: AppState) -> Router {
             put(routes::items::put_item).delete(routes::items::delete_item),
         )
         .route("/api/v1/vault/events", get(routes::items::events))
+        .route(
+            "/api/v1/accounts/recovery/start",
+            post(routes::recovery::start),
+        )
+        .route(
+            "/api/v1/accounts/recovery/data",
+            get(routes::recovery::data),
+        )
+        .route(
+            "/api/v1/accounts/recovery/complete",
+            post(routes::recovery::complete),
+        )
+        .route(
+            "/api/v1/accounts/recovery/cancel",
+            get(routes::recovery::cancel),
+        )
+        .route(
+            "/api/v1/account/backup-email",
+            post(routes::recovery::set_backup_email).delete(routes::recovery::remove_backup_email),
+        )
+        .route(
+            "/api/v1/accounts/verify-backup",
+            get(routes::recovery::verify_backup_email),
+        )
         .with_state(state)
 }

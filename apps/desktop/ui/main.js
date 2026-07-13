@@ -5,7 +5,7 @@
 const invoke = window.__TAURI__.core.invoke;
 
 const $ = (id) => document.getElementById(id);
-const screens = ["screen-setup", "screen-recovery", "screen-unlock", "screen-vault"];
+const screens = ["screen-setup", "screen-recovery", "screen-unlock", "screen-vault", "screen-recover"];
 
 let mode = "login";           // setup screen tab
 let selectedId = null;        // item currently in the editor
@@ -23,7 +23,8 @@ async function refreshStatus() {
       await renderList();
     }
   } else if (st.state === "locked") {
-    if ($("screen-unlock").hidden && $("screen-setup").hidden && $("screen-recovery").hidden) {
+    if ($("screen-unlock").hidden && $("screen-setup").hidden &&
+        $("screen-recovery").hidden && $("screen-recover").hidden) {
       show("screen-unlock");
     } else if (!$("screen-vault").hidden) {
       // Auto-lock fired while the vault was open.
@@ -31,7 +32,7 @@ async function refreshStatus() {
       show("screen-unlock");
     }
     $("unlock-email").textContent = st.email ?? "";
-  } else if ($("screen-recovery").hidden) {
+  } else if ($("screen-recovery").hidden && $("screen-recover").hidden) {
     show("screen-setup");
   }
 }
@@ -322,6 +323,92 @@ async function regenerate() {
     $("gen-output").textContent = String(e);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Recovery
+
+$("goto-recover").addEventListener("click", () => {
+  $("rec-server").value = $("setup-server").value;
+  $("rec-email").value = $("setup-email").value;
+  show("screen-recover");
+});
+$("rec-back").addEventListener("click", () => show("screen-setup"));
+
+$("rec-send").addEventListener("click", async () => {
+  $("rec-send-msg").textContent = "";
+  try {
+    const msg = await invoke("recover_start", {
+      serverUrl: $("rec-server").value.trim(),
+      email: $("rec-email").value.trim(),
+    });
+    $("rec-send-msg").textContent = msg;
+  } catch (e) {
+    $("rec-send-msg").textContent = String(e);
+  }
+});
+
+$("rec-complete").addEventListener("click", async () => {
+  $("rec-error").textContent = "";
+  const kit = $("rec-kit").value.trim();
+  const wipe = $("rec-wipe").checked;
+  try {
+    if ($("rec-pass").value !== $("rec-pass2").value) throw "passwords do not match";
+    if (wipe && kit) throw "either enter your kit code OR choose the wipe option, not both";
+    if (wipe && !confirm(
+      "This permanently DESTROYS every item stored in the vault. " +
+      "There is no undo. Continue?")) return;
+    const res = await invoke("recover_complete", {
+      serverUrl: $("rec-server").value.trim(),
+      token: $("rec-token").value.trim(),
+      recoveryCode: kit || null,
+      newPassword: $("rec-pass").value,
+      wipe,
+    });
+    $("rec-pass").value = $("rec-pass2").value = "";
+    // Show the NEW Recovery Kit, then send the user to login.
+    $("recovery-code").textContent = res.recovery_code;
+    $("recovery-ack").checked = false;
+    $("recovery-done").disabled = true;
+    $("setup-server").value = $("rec-server").value;
+    $("setup-email").value = $("rec-email").value;
+    show("screen-recovery");
+  } catch (e) {
+    $("rec-error").textContent = String(e);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Account settings (backup e-mail)
+
+const accountDialog = $("account-dialog");
+$("btn-account").addEventListener("click", () => {
+  $("acc-msg").textContent = "";
+  accountDialog.showModal();
+});
+$("acc-close").addEventListener("click", () => accountDialog.close());
+
+async function backupEmailAction(action) {
+  $("acc-msg").textContent = "";
+  const totp = $("acc-totp").value.trim();
+  try {
+    const args = {
+      password: $("acc-password").value,
+      totpCode: totp.length ? totp : null,
+    };
+    if (action === "set") {
+      args.backupEmail = $("acc-backup-email").value.trim();
+      $("acc-msg").textContent = await invoke("set_backup_email", args);
+    } else {
+      await invoke("remove_backup_email", args);
+      $("acc-msg").textContent = "Backup e-mail removed.";
+    }
+    $("acc-password").value = "";
+  } catch (e) {
+    $("acc-msg").textContent = String(e);
+  }
+}
+$("acc-set").addEventListener("click", () => backupEmailAction("set"));
+$("acc-remove").addEventListener("click", () => backupEmailAction("remove"));
 
 // ---------------------------------------------------------------------------
 

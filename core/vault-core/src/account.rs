@@ -30,6 +30,10 @@ impl core::fmt::Debug for AccountSecrets {
 pub struct RegistrationBundle {
     pub kdf_params: KdfParams,
     pub auth_credential: [u8; 32],
+    /// HKDF branch of the Vault Key; the server stores its hash and requires
+    /// the preimage for data-preserving recovery (proof of Recovery Kit
+    /// possession). See [`crate::keys::VaultKey::recovery_verifier`].
+    pub recovery_verifier: [u8; 32],
     pub master_wrapped_vault_key: WrappedKey,
     pub recovery_wrapped_vault_key: WrappedKey,
 }
@@ -58,6 +62,7 @@ pub fn register(
     let bundle = RegistrationBundle {
         kdf_params: params,
         auth_credential: auth_key.to_server_credential(),
+        recovery_verifier: vault_key.recovery_verifier(),
         master_wrapped_vault_key: wrapping_key.wrap_vault_key(&vault_key),
         recovery_wrapped_vault_key: recovery_key.wrap_vault_key(&vault_key),
     };
@@ -127,6 +132,7 @@ pub fn recover_and_rekey(
     let bundle = RegistrationBundle {
         kdf_params: params,
         auth_credential: auth_key.to_server_credential(),
+        recovery_verifier: vault_key.recovery_verifier(),
         master_wrapped_vault_key: wrapping_key.wrap_vault_key(&vault_key),
         recovery_wrapped_vault_key: new_recovery_key.wrap_vault_key(&vault_key),
     };
@@ -159,6 +165,7 @@ pub fn change_password(
     let bundle = RegistrationBundle {
         kdf_params: params,
         auth_credential: auth_key.to_server_credential(),
+        recovery_verifier: secrets.vault_key.recovery_verifier(),
         master_wrapped_vault_key: wrapping_key.wrap_vault_key(&secrets.vault_key),
         recovery_wrapped_vault_key: recovery_key.wrap_vault_key(&secrets.vault_key),
     };

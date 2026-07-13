@@ -18,7 +18,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .screen { min-height: 100vh; display: flex; flex-direction: column; }
 /* `display: flex` above outranks the UA rule for [hidden]; restore it. */
 [hidden] { display: none !important; }
-#screen-setup, #screen-unlock, #screen-recovery { align-items: center; justify-content: center; }
+#screen-setup, #screen-unlock, #screen-recovery, #screen-recover {
+  align-items: center; justify-content: center; padding: 2rem 0;
+}
 
 .card {
   background: var(--panel);
@@ -98,6 +100,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .withcopy input { flex: 1; }
 
 .backbtn { margin-bottom: 0.8rem; }
+fieldset.step {
+  border: 1px solid var(--border); border-radius: 8px;
+  margin: 1rem 0; padding: 0.4rem 0.9rem 0.9rem;
+}
+fieldset.step legend { color: var(--muted); font-size: 0.85rem; padding: 0 0.4rem; }
+.danger-check { display: block; color: var(--danger); }
+.danger-check input { display: inline-block; width: auto; margin: 0 0.4rem 0 0; vertical-align: middle; }
 
 /* Phone layout: the list fills the screen; opening an item slides the
    detail pane over it, with a back button. Touch targets grow. */

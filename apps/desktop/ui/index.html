@@ -35,6 +35,48 @@
       <button id="setup-submit" class="primary">Log in</button>
       <p class="muted small">Your master password never leaves this device. If you
         forget it, only your Recovery Kit can restore your vault.</p>
+      <button id="goto-recover" class="linklike">Forgot your master password? Recover your vault…</button>
+    </div>
+  </section>
+
+  <!-- Recovery: e-mail token + Recovery Kit -> new password -->
+  <section id="screen-recover" class="screen" hidden>
+    <div class="card narrow">
+      <h1>Recover your vault</h1>
+      <label>Server URL
+        <input id="rec-server" type="url" placeholder="https://vault.example.com" autocomplete="off" />
+      </label>
+      <fieldset class="step">
+        <legend>Step 1 — request recovery</legend>
+        <label>Account e-mail
+          <input id="rec-email" type="email" autocomplete="username" />
+        </label>
+        <button id="rec-send">Send recovery e-mail</button>
+        <p id="rec-send-msg" class="muted small"></p>
+      </fieldset>
+      <fieldset class="step">
+        <legend>Step 2 — after the cooling-off period</legend>
+        <label>Recovery token <span class="muted">(from the e-mail)</span>
+          <input id="rec-token" autocomplete="off" />
+        </label>
+        <label>Recovery Kit code <span class="muted">(BV1-…)</span>
+          <input id="rec-kit" autocomplete="off" placeholder="BV1-XXXXX-XXXXX-…" />
+        </label>
+        <label>New master password
+          <input id="rec-pass" type="password" autocomplete="off" />
+        </label>
+        <label>Repeat new master password
+          <input id="rec-pass2" type="password" autocomplete="off" />
+        </label>
+        <label class="check danger-check">
+          <input id="rec-wipe" type="checkbox" />
+          I lost my Recovery Kit — reset the account and <strong>permanently
+          destroy</strong> everything stored in it
+        </label>
+        <p id="rec-error" class="error" role="alert"></p>
+        <button id="rec-complete" class="primary">Recover vault</button>
+      </fieldset>
+      <button id="rec-back" class="linklike">← Back</button>
     </div>
   </section>
 
@@ -76,6 +118,7 @@
       <span id="sync-status" class="muted small"></span>
       <button id="btn-sync" title="Sync now">⟳ Sync</button>
       <button id="btn-new">＋ New item</button>
+      <button id="btn-account" title="Account settings">⚙</button>
       <button id="btn-lock" title="Lock vault">🔒 Lock</button>
     </header>
     <main class="split">
@@ -124,6 +167,24 @@
       </section>
     </main>
   </section>
+
+  <!-- Account settings dialog -->
+  <dialog id="account-dialog">
+    <h2>Trusted backup e-mail</h2>
+    <p class="muted small">A verified backup address receives recovery
+      instructions too — useful if you lose access to your main inbox.
+      Changes require your master password (and 2FA code if enabled).</p>
+    <label>Backup e-mail <input id="acc-backup-email" type="email" /></label>
+    <label>Master password <input id="acc-password" type="password" autocomplete="off" /></label>
+    <label>Two-factor code <span class="muted">(if enabled)</span>
+      <input id="acc-totp" inputmode="numeric" maxlength="6" autocomplete="off" /></label>
+    <p id="acc-msg" class="error" role="alert"></p>
+    <div class="row">
+      <button id="acc-set" class="primary">Set backup e-mail</button>
+      <button id="acc-remove" class="danger">Remove</button>
+      <button id="acc-close">Close</button>
+    </div>
+  </dialog>
 
   <!-- Password generator dialog -->
   <dialog id="gen-dialog">
