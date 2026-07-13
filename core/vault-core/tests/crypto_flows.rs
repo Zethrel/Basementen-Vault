@@ -350,3 +350,15 @@ fn encrypted_structures_serialize_roundtrip() {
     let unlocked = account::unlock(PASSWORD, EMAIL, &reg.bundle.kdf_params, &wrapped_back).unwrap();
     assert_eq!(unlocked.vault_key.decrypt_item(&item_back).unwrap(), b"x");
 }
+
+// ---------------------------------------------------------------------------
+// Export envelope (single desktop-cost run; volume testing lives in proptests)
+
+#[test]
+fn export_envelope_roundtrip() {
+    let envelope = vault_core::encrypt_export(b"backup payload", "a passphrase").unwrap();
+    assert_eq!(envelope.format, "basementen-vault-export");
+    let back = vault_core::decrypt_export(&envelope, "a passphrase").unwrap();
+    assert_eq!(&*back, b"backup payload");
+    assert!(vault_core::decrypt_export(&envelope, "other").is_err());
+}

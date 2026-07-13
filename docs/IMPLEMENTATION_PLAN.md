@@ -244,6 +244,10 @@ recommendation and the rest of this plan assumes it.
 
 ## 8. Milestones
 
+> **Status:** M0–M7 implemented (M7 with WebAuthn deferred as noted below).
+> Remaining before real-world use: external security review, and the
+> follow-ups tracked in `THREAT_MODEL.md` §Known gaps.
+
 ### M0 — Foundations (week 1–2)
 - Repo layout (monorepo: `core/`, `server/`, `apps/desktop/`, `apps/mobile/`, `docs/`)
 - CI: build, tests, `cargo audit`/dependency scanning, lint, secret scanning
@@ -281,12 +285,19 @@ recommendation and the rest of this plan assumes it.
   cooling-off period and cancellation, explicit data-loss warnings
 
 ### M7 — Hardening & release (week 20–24)
-- WebAuthn as MFA factor
-- Full security review: this repo's threat model revisited, fuzzing the sync
-  protocol, dependency audit, **external penetration test / crypto review
-  before any real users** (non-negotiable for a credential product)
-- Export/import (encrypted export + standard CSV import from other managers)
-- Operational runbook: backups, key-parameter migration plan, incident response
+- ~~WebAuthn as MFA factor~~ **Deferred post-v1**: Tauri's WebKit webviews
+  lack usable `navigator.credentials` platform-authenticator support, so an
+  in-app WebAuthn ceremony cannot be implemented honestly today. Revisit
+  alongside the browser extension (which runs in a real browser) or via
+  native platform FFI. TOTP + single-use recovery codes remain the v1
+  second factor. Rationale recorded in `THREAT_MODEL.md`.
+- ✅ Property-based fuzzing of all parsers/envelopes (proptest), dependency
+  audit in CI, threat model written (`THREAT_MODEL.md`); **external
+  penetration test / crypto review before any real users still required**
+- ✅ Export/import: encrypted export with independent passphrase, CSV import
+  (generic + Bitwarden), conflict-copy materialization in the app
+- ✅ Operational runbook (`RUNBOOK.md`): backups, upgrades, KDF migration,
+  incident response
 
 ---
 

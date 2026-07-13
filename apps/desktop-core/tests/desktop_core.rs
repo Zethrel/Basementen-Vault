@@ -391,3 +391,76 @@ async fn api_client_recovery_lifecycle() {
         b"survives recovery"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Export / import
+
+#[test]
+fn encrypted_export_roundtrip_and_wrong_passphrase() {
+    let items = vec![
+        Item::Login {
+            name: "GitHub".into(),
+            username: "sig".into(),
+            password: "hunter2".into(),
+            url: "https://github.com".into(),
+            notes: String::new(),
+            tags: vec![],
+        },
+        Item::Note {
+            name: "Wi-Fi".into(),
+            notes: "the code is on the router".into(),
+            tags: vec![],
+        },
+    ];
+
+    let file = desktop_core::export_encrypted(&items, "export passphrase").unwrap();
+    assert!(file.contains("basementen-vault-export"));
+    assert!(
+        !file.contains("hunter2"),
+        "plaintext must never appear in the export file"
+    );
+
+    let back = desktop_core::import_encrypted(&file, "export passphrase").unwrap();
+    assert_eq!(back.len(), 2);
+    assert_eq!(back[0].name(), "GitHub");
+
+    assert!(matches!(
+        desktop_core::import_encrypted(&file, "wrong passphrase").unwrap_err(),
+        desktop_core::TransferError::Decrypt
+    ));
+    assert!(matches!(
+        desktop_core::import_encrypted("{\"not\":\"an export\"}", "x").unwrap_err(),
+        desktop_core::TransferError::BadFormat
+    ));
+}
+
+#[test]
+fn csv_import_generic_and_bitwarden() {
+    let generic = "name,url,username,password,notes\n\
+                   GitHub,https://github.com,sig,hunter2,work\n\
+                   \"Comma, Inc\",https://comma.example,me,\"p,w\",";
+    let items = desktop_core::import_csv(generic).unwrap();
+    assert_eq!(items.len(), 2);
+    match &items[1] {
+        Item::Login { name, password, .. } => {
+            assert_eq!(name, "Comma, Inc");
+            assert_eq!(password, "p,w");
+        }
+        other => panic!("expected login, got {other:?}"),
+    }
+
+    let bitwarden = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n\
+                     ,,login,Router,,,0,http://192.168.1.1,admin,s3cret,\n\
+                     ,,note,Some note,text,,0,,,,";
+    let items = desktop_core::import_csv(bitwarden).unwrap();
+    assert_eq!(items.len(), 1, "non-login rows are skipped");
+    match &items[0] {
+        Item::Login { name, username, .. } => {
+            assert_eq!(name, "Router");
+            assert_eq!(username, "admin");
+        }
+        other => panic!("expected login, got {other:?}"),
+    }
+
+    assert!(desktop_core::import_csv("just,some,random\ndata,x,y").is_err());
+}

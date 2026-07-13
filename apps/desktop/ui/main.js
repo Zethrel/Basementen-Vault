@@ -410,6 +410,31 @@ async function backupEmailAction(action) {
 $("acc-set").addEventListener("click", () => backupEmailAction("set"));
 $("acc-remove").addEventListener("click", () => backupEmailAction("remove"));
 
+$("btn-export").addEventListener("click", async () => {
+  $("xfer-msg").textContent = "";
+  try {
+    $("xfer-msg").textContent = await invoke("export_vault", {
+      passphrase: $("xfer-passphrase").value,
+    });
+    $("xfer-passphrase").value = "";
+  } catch (e) {
+    $("xfer-msg").textContent = String(e);
+  }
+});
+
+$("btn-import").addEventListener("click", async () => {
+  $("xfer-msg").textContent = "";
+  try {
+    const pass = $("xfer-passphrase").value;
+    const res = await invoke("import_vault", { passphrase: pass.length ? pass : null });
+    $("xfer-msg").textContent = `Imported ${res.imported} item(s).`;
+    $("xfer-passphrase").value = "";
+    await renderList();
+  } catch (e) {
+    $("xfer-msg").textContent = String(e);
+  }
+});
+
 // ---------------------------------------------------------------------------
 
 setMode("login");

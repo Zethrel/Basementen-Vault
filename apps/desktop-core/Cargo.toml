@@ -19,6 +19,7 @@ rand = "0.8"
 thiserror = "2"
 uuid = { version = "1", features = ["v7"] }
 zeroize = "1"
+csv = "1"
 
 [dev-dependencies]
 vault-server = { path = "../../server/vault-server" }

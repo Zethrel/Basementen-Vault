@@ -141,3 +141,6 @@ dialog::backdrop { background: rgba(0,0,0,0.55); }
 }
 .gen-meter { height: 6px; background: var(--panel-2); border-radius: 3px; margin-top: 0.6rem; }
 #gen-meter-fill { height: 100%; border-radius: 3px; background: var(--danger); width: 0; transition: width 0.15s, background 0.15s; }
+
+hr.sep { border: none; border-top: 1px solid var(--border); margin: 1.2rem 0; }
+dialog h2 { font-size: 1.05rem; margin: 0.2rem 0 0.4rem; }

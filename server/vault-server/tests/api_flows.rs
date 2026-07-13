@@ -574,3 +574,19 @@ async fn writes_nudge_change_subscribers() {
     let seq = rx.try_recv().expect("a change nudge should have been sent");
     assert_eq!(seq, 1);
 }
+
+#[tokio::test]
+async fn responses_carry_security_headers() {
+    let server = test_server().await;
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/health")
+        .body(Body::empty())
+        .unwrap();
+    let response = server.app.clone().oneshot(request).await.unwrap();
+    let headers = response.headers();
+    assert_eq!(headers["cache-control"], "no-store");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(headers["x-frame-options"], "DENY");
+    assert_eq!(headers["referrer-policy"], "no-referrer");
+}

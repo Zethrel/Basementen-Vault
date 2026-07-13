@@ -16,10 +16,39 @@ pub mod security;
 pub mod state;
 pub mod totp;
 
+use axum::http::header::{HeaderName, HeaderValue};
 use axum::routing::{get, post, put};
 use axum::Router;
 
 use crate::state::AppState;
+
+/// Baseline security headers on every response. The API serves JSON to
+/// native clients, so the browser-oriented headers are pure defense in
+/// depth (e.g. if a response ever gets opened in a browser tab).
+async fn security_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    let set = |headers: &mut axum::http::HeaderMap, name: &'static str, value: &'static str| {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    };
+    // Responses carry secrets (wrapped keys, tokens): never cache.
+    set(headers, "cache-control", "no-store");
+    set(headers, "x-content-type-options", "nosniff");
+    set(headers, "x-frame-options", "DENY");
+    set(headers, "referrer-policy", "no-referrer");
+    set(
+        headers,
+        "content-security-policy",
+        "default-src 'none'; frame-ancestors 'none'",
+    );
+    response
+}
 
 pub fn build_app(state: AppState) -> Router {
     Router::new()
@@ -70,5 +99,6 @@ pub fn build_app(state: AppState) -> Router {
             "/api/v1/accounts/verify-backup",
             get(routes::recovery::verify_backup_email),
         )
+        .layer(axum::middleware::from_fn(security_headers))
         .with_state(state)
 }

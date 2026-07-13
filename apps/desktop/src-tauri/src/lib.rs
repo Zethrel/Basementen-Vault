@@ -11,6 +11,7 @@ use desktop_core::{ApiClient, AutoLock, GeneratorOptions, Item, ItemSummary, Sql
 use serde::Serialize;
 use tauri::{Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
 use vault_core::account::AccountSecrets;
 use vault_sync::{LocalVault, PendingOp};
 
@@ -351,6 +352,40 @@ async fn sync_now(ctx: Ctx<'_>) -> Result<SyncSummary, String> {
     match try_sync(unlocked).await {
         Some(report) => {
             persist_rotated_refresh_token(unlocked);
+            // Materialize losing edits as "(conflicted copy)" items so no
+            // keystroke is ever silently discarded. The copies are new items
+            // and will reach the server on the next sync pass below.
+            let mut copies = 0;
+            for conflict in &report.conflicts {
+                let vault_sync::PendingOp::Upsert(envelope) = &conflict.losing_op else {
+                    continue; // a losing delete: server state stands, nothing to save
+                };
+                let Ok(plain) = unlocked.secrets.vault_key.decrypt_item(envelope) else {
+                    continue;
+                };
+                let Ok(mut item) = Item::from_plaintext(&plain) else {
+                    continue;
+                };
+                match &mut item {
+                    Item::Login { name, .. }
+                    | Item::Note { name, .. }
+                    | Item::Card { name, .. } => {
+                        name.push_str(" (conflicted copy)");
+                    }
+                }
+                let id = uuid::Uuid::now_v7().to_string();
+                if let Ok(plain) = item.to_plaintext() {
+                    if let Ok(new_envelope) =
+                        unlocked.secrets.vault_key.encrypt_item(&id, 1, &plain)
+                    {
+                        unlocked.vault.stage(PendingOp::Upsert(new_envelope));
+                        copies += 1;
+                    }
+                }
+            }
+            if copies > 0 {
+                try_sync(unlocked).await;
+            }
             Ok(SyncSummary {
                 pushed: report.pushed,
                 pulled: report.pulled,
@@ -510,6 +545,107 @@ async fn remove_backup_email(
 }
 
 // ---------------------------------------------------------------------------
+// Export / import
+
+fn decrypted_items(unlocked: &Unlocked) -> Vec<Item> {
+    let mut items = Vec::new();
+    for stored in unlocked.vault.list() {
+        if stored.deleted || stored.item_id.starts_with("__meta/") {
+            continue;
+        }
+        let Some(content) = &stored.content else {
+            continue;
+        };
+        let Ok(plain) = unlocked.secrets.vault_key.decrypt_item(content) else {
+            continue;
+        };
+        if let Ok(item) = Item::from_plaintext(&plain) {
+            items.push(item);
+        }
+    }
+    items
+}
+
+/// Export the whole vault as an encrypted backup file.
+#[tauri::command]
+async fn export_vault(
+    app: tauri::AppHandle,
+    ctx: Ctx<'_>,
+    passphrase: String,
+) -> Result<String, String> {
+    if passphrase.chars().count() < 12 {
+        return Err("export passphrase must be at least 12 characters".into());
+    }
+    let file_contents = {
+        let mut inner = ctx.inner.lock().await;
+        let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+        unlocked.autolock.touch();
+        desktop_core::export_encrypted(&decrypted_items(unlocked), &passphrase).map_err(err)?
+    };
+
+    let path = app
+        .dialog()
+        .file()
+        .set_file_name("basementen-vault-backup.bvexport")
+        .blocking_save_file()
+        .and_then(|p| p.into_path().ok())
+        .ok_or("export cancelled")?;
+    std::fs::write(&path, file_contents).map_err(err)?;
+    Ok(format!("Encrypted backup written to {}", path.display()))
+}
+
+#[derive(Serialize)]
+struct ImportResult {
+    imported: usize,
+}
+
+/// Import items from a file: an encrypted .bvexport (needs its passphrase)
+/// or a CSV export from another password manager.
+#[tauri::command]
+async fn import_vault(
+    app: tauri::AppHandle,
+    ctx: Ctx<'_>,
+    passphrase: Option<String>,
+) -> Result<ImportResult, String> {
+    let path = app
+        .dialog()
+        .file()
+        .add_filter("Vault import", &["bvexport", "csv", "json"])
+        .blocking_pick_file()
+        .and_then(|p| p.into_path().ok())
+        .ok_or("import cancelled")?;
+    let contents = std::fs::read_to_string(&path).map_err(err)?;
+
+    let items = if contents.contains("basementen-vault-export") {
+        let passphrase = passphrase
+            .filter(|p| !p.is_empty())
+            .ok_or("this is an encrypted backup — enter its passphrase")?;
+        desktop_core::import_encrypted(&contents, &passphrase).map_err(err)?
+    } else {
+        desktop_core::import_csv(&contents).map_err(err)?
+    };
+
+    let imported = items.len();
+    {
+        let mut inner = ctx.inner.lock().await;
+        let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+        unlocked.autolock.touch();
+        for item in items {
+            let id = uuid::Uuid::now_v7().to_string();
+            let plain = item.to_plaintext().map_err(err)?;
+            let envelope = unlocked
+                .secrets
+                .vault_key
+                .encrypt_item(&id, 1, &plain)
+                .map_err(err)?;
+            unlocked.vault.stage(PendingOp::Upsert(envelope));
+        }
+    }
+    sync_now(ctx).await.ok();
+    Ok(ImportResult { imported })
+}
+
+// ---------------------------------------------------------------------------
 // Generator & clipboard
 
 #[derive(Serialize)]
@@ -549,6 +685,7 @@ async fn copy_secret(app: tauri::AppHandle, text: String) -> Result<(), String> 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -592,6 +729,8 @@ pub fn run() {
             recover_complete,
             set_backup_email,
             remove_backup_email,
+            export_vault,
+            import_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running application");

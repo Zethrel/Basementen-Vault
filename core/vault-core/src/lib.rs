@@ -34,6 +34,7 @@
 pub mod account;
 pub mod envelope;
 pub mod error;
+pub mod export;
 pub mod item;
 pub mod kdf;
 pub mod keys;
@@ -42,6 +43,7 @@ pub mod recovery;
 pub use account::{AccountSecrets, RegistrationBundle};
 pub use envelope::WrappedKey;
 pub use error::CryptoError;
+pub use export::{decrypt_export, encrypt_export, ExportEnvelope};
 pub use item::EncryptedItem;
 pub use kdf::KdfParams;
 pub use keys::{AuthKey, MasterKey, RecoveryKey, VaultKey, WrappingKey};

@@ -182,6 +182,18 @@
     <div class="row">
       <button id="acc-set" class="primary">Set backup e-mail</button>
       <button id="acc-remove" class="danger">Remove</button>
+    </div>
+    <hr class="sep" />
+    <h2>Backup &amp; migration</h2>
+    <p class="muted small">Exports are encrypted with their own passphrase and
+      restore anywhere — even without your server. CSV import accepts exports
+      from Bitwarden and most other password managers.</p>
+    <label>Export/import passphrase
+      <input id="xfer-passphrase" type="password" autocomplete="off" /></label>
+    <p id="xfer-msg" class="error" role="alert"></p>
+    <div class="row">
+      <button id="btn-export">Export encrypted backup…</button>
+      <button id="btn-import">Import file…</button>
       <button id="acc-close">Close</button>
     </div>
   </dialog>
