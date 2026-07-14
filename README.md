@@ -6,13 +6,13 @@ derivation, end-to-end encrypted sync, MFA, and offline-capable recovery.
 
 ## Status
 
-Milestones M0–M7 implemented: crypto core, self-hostable server (MFA,
-rate-limiting, recovery), offline-first sync, desktop app (also builds for
-Android/iOS from the same codebase), export/import, and hardening. **Not yet
-production-ready:** an external security review is a hard prerequisite before
-real-world use (see the runbook), and several post-v1 hardening items are
-tracked in the threat model. See [CHANGELOG.md](CHANGELOG.md) for the full
-development history.
+First tagged release: **1.0.0-beta.1** — feature-complete (crypto core,
+self-hostable server with MFA/rate-limiting/recovery, offline-first sync,
+desktop app that also builds for Android/iOS, export/import) and hardened across
+three review rounds plus follow-on passes. **It is an unaudited beta:** an
+independent security review is a hard prerequisite before real-world use (see
+the runbook), so don't store irreplaceable secrets in it yet. Post-v1 items are
+tracked in the threat model; see [CHANGELOG.md](CHANGELOG.md) for the history.
 
 ## Documentation
 

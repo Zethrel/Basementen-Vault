@@ -5,13 +5,17 @@ All notable changes to Basementen Vault are recorded here. The format follows
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it
 reaches 1.0.
 
-> **Status:** everything below is pre-release development toward 1.0. **No
-> version has been published, and the project has not had an independent
-> security audit** (a hard prerequisite before real-world use — see
-> `SECURITY.md` and `docs/RUNBOOK.md`). On-disk/on-the-wire formats are
-> versioned but may still change before 1.0.
+> **Status:** the first tagged release is **1.0.0-beta.1**. It is an
+> **unaudited beta** — the project has **not** had an independent security audit
+> (a hard prerequisite before real-world use; see `SECURITY.md` and
+> `docs/RUNBOOK.md`). Do not store irreplaceable secrets in it yet. On-disk /
+> on-the-wire formats are versioned but may still change before a final 1.0.0.
 
 ## [Unreleased]
+
+## [1.0.0-beta.1] - 2026-07-14
+
+First tagged release. Everything below is the initial feature set and hardening.
 
 ### Added
 
@@ -109,4 +113,5 @@ reaches 1.0.
   sender-constrained (DPoP/mTLS) tokens, WebAuthn/passkeys, mobile Argon2
   parameter benchmarking, and the WebView / JavaScript-heap plaintext residual.
 
-[Unreleased]: https://github.com/Zethrel/Basementen-Vault/commits/main
+[Unreleased]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.1...HEAD
+[1.0.0-beta.1]: https://github.com/Zethrel/Basementen-Vault/releases/tag/v1.0.0-beta.1
