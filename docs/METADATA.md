@@ -14,7 +14,7 @@ the actual schema (`server/vault-server/migrations/`).
 | Account + verification timestamps | `accounts.created_at`, `email_verified_at` | Coarse activity signal. |
 | KDF parameters | `accounts.kdf_params` | Public tuning values, not secret. |
 | **Number of vault items** | row count in `vault_items` | A genuine leak — see below. |
-| **Approximate size of each item** | `vault_items.content` ciphertext length | AEAD adds a fixed 16-byte tag; length ≈ plaintext length. Leaks "is this a short password or a long note". See recommendation. |
+| Size *bucket* of each item | `vault_items.content` ciphertext length | **Mitigated:** v2 items pad plaintext to 256-byte buckets before encryption, so the length reveals only which bucket an item falls in, not its exact size. Every ordinary login/card shares one length; a long note still leaks its size to 256-byte granularity. (v1 items predating this remain unpadded until their next write; see below.) |
 | Per-item modification cadence | `vault_items.updated_at`, `seq`, `revision` | Reveals *when* and *how often* items change, not what. |
 | Item identifiers | `vault_items.item_id` (UUIDv7) | Random v7 UUIDs; the embedded timestamp reveals item *creation* time. |
 | Deletions | `vault_items.deleted` tombstones | Reveals that an item existed and was deleted. |
@@ -35,11 +35,15 @@ the actual schema (`server/vault-server/migrations/`).
 
 ## Recommendations (tracked, not yet implemented)
 
-1. **Pad item plaintext before encryption** (e.g. to the next 256-byte
-   bucket) so ciphertext length no longer approximates content length. This
-   is the most impactful metadata hardening; it touches the item crypto
-   format, so it ships as a versioned `EncryptedItem` v2 with a migration —
-   scheduled post-v1. Tracked in `THREAT_MODEL.md` §Known gaps.
+1. **Pad item plaintext before encryption** — **DONE.** Shipped as
+   `EncryptedItem` **v2**: plaintext is length-prefixed and zero-padded to the
+   next 256-byte bucket before encryption, so ciphertext length no longer
+   approximates content length. The version is authenticated in the AEAD AAD
+   (I12), and v1 (unpadded) records still decrypt, migrating to v2 on their
+   next write. Format spec in `CRYPTOGRAPHIC_INVARIANTS.md` §Item record
+   format; guards in `item::tests` + `crypto_flows::item_ciphertext_length_is_bucketed`.
+   A larger fixed floor or exponential bucketing could hide big notes better —
+   a future v3 option, not needed for v1.
 2. **Make `device_name` opt-in** in the app UI rather than defaulting to the
    hostname, for users who prefer not to record it.
 3. **Document proxy log hygiene** in `SELF_HOSTING.md` for IP-privacy-

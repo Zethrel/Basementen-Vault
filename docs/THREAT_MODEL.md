@@ -308,7 +308,7 @@ Ordered roughly by priority for post-v1 work.
 | Gap | Priority | Status |
 |---|---|---|
 | Whole-vault rollback by malicious server | **Mitigated** | Implemented: per-device monotonic guard + vault-key-MAC'd cross-device checkpoint + withholding detection (§A2). Only the first-sync-of-a-fresh-install-with-no-anchor case remains (narrow residual, §A2). |
-| **Item-size metadata leak** | High | Ciphertext length ≈ plaintext length. Fix: pad item plaintext to fixed buckets as a versioned `EncryptedItem` v2 (`docs/METADATA.md` rec. 1). |
+| Item-size metadata leak | **Mitigated** | Implemented as `EncryptedItem` v2: plaintext is length-prefixed and zero-padded to 256-byte buckets before encryption, so ciphertext length reveals only a bucket. v1 records migrate on next write. Residual: long notes still leak size to 256-byte granularity (a future larger floor / exponential bucketing could tighten it). §Item record format in CRYPTOGRAPHIC_INVARIANTS. |
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
 | Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |

@@ -225,12 +225,49 @@ fn item_binds_id_and_revision() {
 #[test]
 fn item_binds_version_in_aad() {
     // The record version is authenticated: flipping it must fail decryption,
-    // not silently succeed or trigger a different code path.
+    // not silently succeed or trigger a different code path. `encrypt_item`
+    // produces v2; downgrading the label to v1 changes the AAD and must break
+    // authentication, and an unknown version is rejected outright.
     let vk = VaultKey::generate();
     let item = vk.encrypt_item("item-1", 1, b"secret").unwrap();
-    let mut wrong_version = item.clone();
-    wrong_version.version = 2;
-    assert!(vk.decrypt_item(&wrong_version).is_err());
+    assert_eq!(item.version, 2, "new items are written as v2 (padded)");
+
+    let mut downgraded = item.clone();
+    downgraded.version = 1;
+    assert!(vk.decrypt_item(&downgraded).is_err());
+
+    let mut unknown = item.clone();
+    unknown.version = 99;
+    assert!(matches!(
+        vk.decrypt_item(&unknown).unwrap_err(),
+        CryptoError::UnsupportedVersion(99)
+    ));
+}
+
+#[test]
+fn item_ciphertext_length_is_bucketed() {
+    // Padding hides content length: items of very different plaintext sizes
+    // encrypt to the same ciphertext length as long as they share a bucket,
+    // and a short vs long password are indistinguishable by length.
+    let vk = VaultKey::generate();
+    let tiny = vk.encrypt_item("a", 1, b"x").unwrap();
+    let small = vk
+        .encrypt_item("b", 1, b"a 30-character-ish password!!")
+        .unwrap();
+    let medium = vk.encrypt_item("c", 1, &[7u8; 200]).unwrap();
+    assert_eq!(
+        tiny.ciphertext.len(),
+        small.ciphertext.len(),
+        "sub-bucket items share a ciphertext length"
+    );
+    assert_eq!(tiny.ciphertext.len(), medium.ciphertext.len());
+
+    // Crossing a bucket boundary bumps to the next multiple; still coarse.
+    let large = vk.encrypt_item("d", 1, &[7u8; 500]).unwrap();
+    assert!(large.ciphertext.len() > medium.ciphertext.len());
+    // Two different >256, <512 payloads still share a length.
+    let large2 = vk.encrypt_item("e", 1, &[9u8; 300]).unwrap();
+    assert_eq!(large.ciphertext.len(), large2.ciphertext.len());
 }
 
 // ---------------------------------------------------------------------------

@@ -160,14 +160,16 @@ The format version is authenticated, not just present, so a record of one
 version can never be confused for another (crypto-agility safety). Item AAD
 binds `version + item_id + revision`; wrapped-key AAD binds `purpose +
 version`; export AAD binds `version` (and the KDF parameters implicitly, since
-they key the derivation). Clients also validate the version with an explicit
-equality check before use.
+they key the derivation). Clients also validate the version before use — items
+accept `1` or `2` (padded) and reject anything else; the authenticated version
+selects the decrypt path (v2 strips padding), so a downgrade can't smuggle a
+record through a different code path. See §Item record format.
 - **Enforced:** `item.rs::aad_for`, `envelope.rs::wrap_aad`,
   `export.rs::export_aad`; version checks in `decrypt_item`/`unwrap`/
   `decrypt_export`.
 - **Guarded by:** `crypto_flows::item_binds_version_in_aad`,
-  `recovery_wrap_cannot_be_confused_with_master_wrap`, and the export
-  round-trip/tamper proptests.
+  `recovery_wrap_cannot_be_confused_with_master_wrap`, the export
+  round-trip/tamper proptests, and `item::tests::v1_legacy_item_decrypts_and_v2_is_padded`.
 
 ### I14 — Sync sequence is authenticated against rollback
 The global sync sequence is defended two ways: every client keeps a durable
@@ -252,6 +254,32 @@ never wrong — only the wrapped-key blob must be re-fetched, which the next syn
 does.
 
 ---
+
+## Item record format (v1 → v2)
+
+Each vault item is an independently-encrypted `EncryptedItem`:
+
+| Field | Notes |
+|-------|-------|
+| `version` | `1` or `2`; authenticated in the AAD (I12) so it can't be swapped |
+| `item_id` | stable UUIDv7; bound in AAD (anti-swap) |
+| `revision` | per-item monotonic; bound in AAD (anti-rollback) |
+| `nonce` | random 192-bit XChaCha20 nonce (I3) |
+| `ciphertext` | XChaCha20-Poly1305 of the (padded, in v2) plaintext |
+
+AAD = `"basementen-vault/v1/item" ‖ version_le ‖ len(id)_le ‖ id ‖ revision_le`.
+
+**v2 padding (metadata hardening).** Before encryption the plaintext is wrapped
+as `u32-LE real-length ‖ plaintext ‖ zero padding`, rounded up to the next
+**256-byte** bucket (at least one block). On decrypt the length prefix is read
+and exactly that many bytes returned; a prefix that overruns the buffer is
+rejected. This makes the stored ciphertext length reveal only a 256-byte
+bucket, not the exact content size (`docs/METADATA.md`). **v1** records (no
+padding) predate this and still decrypt unchanged; they migrate to v2 the next
+time the item is written (every save re-encrypts at a new revision). Defined in
+`core/vault-core/src/item.rs`; guarded by `item::tests::{pad_roundtrip_and_
+bucketing, v1_legacy_item_decrypts_and_v2_is_padded, unpad_rejects_overrun_
+length}` and `crypto_flows::item_ciphertext_length_is_bucketed`.
 
 ## Export file format (v1)
 

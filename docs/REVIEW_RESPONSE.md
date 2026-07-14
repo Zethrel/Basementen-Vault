@@ -348,6 +348,19 @@ This completes the reviewer's proposed pre-audit milestones (session, sync,
 recovery/enrollment, in-memory audit). The external penetration test / crypto
 review remains the hard blocker before real-world use.
 
+## Post-milestone hardening — item-size padding (2026-07)
+
+Closed the top-priority metadata gap (reviewer point #3, THREAT_MODEL's former
+"High" item). Vault items now encrypt as `EncryptedItem` **v2**: plaintext is
+length-prefixed and zero-padded to 256-byte buckets before AEAD, so the stored
+ciphertext length reveals only which bucket an item falls in — every ordinary
+login and card share one length. The record version is authenticated in the AAD
+(I12); v1 (unpadded) items still decrypt and migrate to v2 on their next write,
+so no forced migration is needed. Residual: long notes still leak their size to
+256-byte granularity (a larger floor or exponential bucketing is a future v3
+option). Spec in CRYPTOGRAPHIC_INVARIANTS §Item record format; guarded by four
+new tests.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer
