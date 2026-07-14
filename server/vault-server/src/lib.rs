@@ -62,6 +62,15 @@ pub fn build_app(state: AppState) -> Router {
         .route("/api/v1/auth/login", post(routes::auth::login))
         .route("/api/v1/auth/refresh", post(routes::auth::refresh))
         .route("/api/v1/auth/logout", post(routes::auth::logout))
+        .route("/api/v1/sessions", get(routes::sessions::list))
+        .route(
+            "/api/v1/sessions/revoke-others",
+            post(routes::sessions::revoke_others),
+        )
+        .route(
+            "/api/v1/sessions/{family_id}",
+            axum::routing::delete(routes::sessions::revoke),
+        )
         .route("/api/v1/mfa/totp/enroll", post(routes::mfa::totp_enroll))
         .route(
             "/api/v1/mfa/totp/activate",

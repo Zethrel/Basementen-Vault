@@ -12,7 +12,7 @@ pub mod session;
 pub mod store;
 pub mod transfer;
 
-pub use api::{ApiClient, ApiError, LoginOutcome, PreloginInfo, RecoveryData};
+pub use api::{ApiClient, ApiError, LoginOutcome, PreloginInfo, RecoveryData, SessionInfo};
 pub use generator::{generate_password, GeneratorOptions};
 pub use items::{Item, ItemSummary};
 pub use session::AutoLock;

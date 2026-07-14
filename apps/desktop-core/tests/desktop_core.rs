@@ -462,3 +462,57 @@ fn csv_import_generic_and_bitwarden() {
 
     assert!(desktop_core::import_csv("just,some,random\ndata,x,y").is_err());
 }
+
+#[tokio::test]
+async fn api_client_session_management() {
+    let (base_url, state) = spawn_server().await;
+    let email = "sessions@example.com";
+    let password = "session master password";
+
+    let reg =
+        vault_core::account::register(password, vault_core::KdfParams::mobile_floor()).unwrap();
+    let mut api_a = ApiClient::new(&base_url);
+    api_a.register(email, &reg.bundle).await.unwrap();
+    sqlx::query("UPDATE accounts SET email_verified_at = 1")
+        .execute(&state.db)
+        .await
+        .unwrap();
+    api_a
+        .login(
+            email,
+            reg.secrets.auth_key.to_server_credential(),
+            None,
+            None,
+            "laptop",
+        )
+        .await
+        .unwrap();
+
+    // A second device.
+    let mut api_b = ApiClient::new(&base_url);
+    api_b
+        .login(
+            email,
+            reg.secrets.auth_key.to_server_credential(),
+            None,
+            None,
+            "phone",
+        )
+        .await
+        .unwrap();
+
+    // Device A sees both, with itself flagged current.
+    let sessions = api_a.list_sessions().await.unwrap();
+    assert_eq!(sessions.len(), 2);
+    let current: Vec<_> = sessions.iter().filter(|s| s.current).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].device_name, "laptop");
+
+    // Revoke the phone; it can no longer list sessions.
+    let phone = sessions.iter().find(|s| s.device_name == "phone").unwrap();
+    api_a.revoke_session(&phone.id).await.unwrap();
+    assert!(api_b.list_sessions().await.is_err());
+
+    // Only the laptop remains.
+    assert_eq!(api_a.list_sessions().await.unwrap().len(), 1);
+}

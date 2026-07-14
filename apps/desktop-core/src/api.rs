@@ -46,6 +46,16 @@ pub struct PreloginInfo {
     pub kdf_salt: Vec<u8>,
 }
 
+/// One active device, as returned by the session list. No secrets.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionInfo {
+    pub id: String,
+    pub device_name: String,
+    pub created_at: i64,
+    pub last_used_at: i64,
+    pub current: bool,
+}
+
 /// Debug omits the wrapped key blob (it's ciphertext, but no need to log it).
 #[derive(Debug)]
 pub struct RecoveryData {
@@ -387,6 +397,54 @@ impl ApiClient {
             .await?;
         if status.is_success() {
             Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
+    }
+
+    // --- session (device) management -------------------------------------
+
+    /// List the account's active devices (non-secret metadata).
+    pub async fn list_sessions(&mut self) -> Result<Vec<SessionInfo>, ApiError> {
+        let (status, body) = self
+            .authed(|http, base, token| {
+                http.get(format!("{base}/api/v1/sessions"))
+                    .bearer_auth(token)
+            })
+            .await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        serde_json::from_value(body["sessions"].clone())
+            .map_err(|e| ApiError::Server(e.to_string()))
+    }
+
+    /// Revoke one device (by its family id from [`list_sessions`]).
+    pub async fn revoke_session(&mut self, id: &str) -> Result<(), ApiError> {
+        let id = id.to_string();
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.delete(format!("{base}/api/v1/sessions/{id}"))
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
+    }
+
+    /// Log out every other device. Returns how many were revoked.
+    pub async fn revoke_other_sessions(&mut self) -> Result<u64, ApiError> {
+        let (status, body) = self
+            .authed(|http, base, token| {
+                http.post(format!("{base}/api/v1/sessions/revoke-others"))
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(body["revoked"].as_u64().unwrap_or(0))
         } else {
             Err(Self::classify(status, &body))
         }

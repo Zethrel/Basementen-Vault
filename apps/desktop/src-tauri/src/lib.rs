@@ -645,6 +645,33 @@ async fn import_vault(
 }
 
 // ---------------------------------------------------------------------------
+// Session (device) management
+
+#[tauri::command]
+async fn list_sessions(ctx: Ctx<'_>) -> Result<Vec<desktop_core::SessionInfo>, String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    unlocked.api.list_sessions().await.map_err(err)
+}
+
+#[tauri::command]
+async fn revoke_session(ctx: Ctx<'_>, id: String) -> Result<(), String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    unlocked.api.revoke_session(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn revoke_other_sessions(ctx: Ctx<'_>) -> Result<u64, String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    unlocked.api.revoke_other_sessions().await.map_err(err)
+}
+
+// ---------------------------------------------------------------------------
 // Generator & clipboard
 
 #[derive(Serialize)]
@@ -728,6 +755,9 @@ pub fn run() {
             recover_complete,
             set_backup_email,
             remove_backup_email,
+            list_sessions,
+            revoke_session,
+            revoke_other_sessions,
             export_vault,
             import_vault,
         ])

@@ -130,6 +130,49 @@ would change the threat model and we'd rather model it when it's real). No
 code exists for these beyond what's already documented; we'll take them one
 at a time.
 
+## Session/auth layer — the reviewer's #1 next milestone (2026-07)
+
+The reviewer named the session layer highest priority ("often more dangerous
+than the encryption itself"). We reviewed it against their checklist and
+hardened the gaps.
+
+Already solid (documented in THREAT_MODEL §A4b): opaque 256-bit access +
+refresh tokens stored only as SHA-256; 15-min access TTL; single-use refresh
+with rotation; refresh-reuse detection that revokes the whole session family;
+no session fixation (server-generated tokens); no CSRF (header auth, not
+cookies).
+
+New in this pass:
+
+- **Absolute session lifetime cap** (90 days). Previously sliding refresh
+  could keep a session alive forever; now a hard ceiling is set at login,
+  carried unchanged through every rotation, and enforced at refresh *and* in
+  the auth extractor. Test: `absolute_lifetime_cap_stops_sliding_refresh`.
+- **Device (session) management API + UI.** `GET /sessions` lists active
+  devices (device name, login time, last-active, current flag — no secrets);
+  `DELETE /sessions/{family}` revokes one; `POST /sessions/revoke-others`
+  logs out everywhere else. Wired into the app's ⚙ dialog as an "Active
+  devices" list with per-device Revoke and "Log out all other devices".
+  Previously the only way to revoke a device was raw SQL (runbook). Tests:
+  `sessions_list_shows_devices_and_current`,
+  `revoke_one_device_kills_only_that_session`,
+  `revoke_others_logs_out_everyone_else`,
+  `cannot_revoke_another_accounts_session` (revocation is account-scoped),
+  plus a client-side end-to-end `api_client_session_management`.
+- **Activity tracking.** `last_used_at` updates on each refresh; `created_at`
+  is carried forward as the original login time (a bug the tests caught: it
+  was resetting on every rotation). Powers the device list and makes stale
+  sessions visible.
+- **Dead-session cleanup** on login (rows past the refresh window, beyond any
+  reuse-detection value) so the table can't grow unbounded.
+
+Deferred (documented): sender-constrained tokens (DPoP/mTLS) to close the
+≤15-min bearer-replay window — a large feature, not warranted for a
+self-hosted vault behind TLS/VPN at v1.
+
+Next from the reviewer's list: the **sync protocol** (rollback/replay/
+conflict), then recovery/device-enrollment and the in-memory-plaintext audit.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

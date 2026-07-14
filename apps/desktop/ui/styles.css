@@ -147,5 +147,19 @@ dialog::backdrop { background: rgba(0,0,0,0.55); }
 hr.sep { border: none; border-top: 1px solid var(--border); margin: 1.2rem 0; }
 dialog h2 { font-size: 1.05rem; margin: 0.2rem 0 0.4rem; }
 
+.session-list { list-style: none; margin: 0.4rem 0; padding: 0; }
+.session-list li {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.2rem; border-bottom: 1px solid var(--border);
+}
+.session-list .sname { font-weight: 600; }
+.session-list .smeta { color: var(--muted); font-size: 0.78rem; }
+.session-list .grow { flex: 1; }
+.session-list .badge {
+  font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--accent-ink); background: var(--accent);
+  border-radius: 4px; padding: 0.1rem 0.35rem;
+}
+
 .brand-mark { display: block; height: 72px; margin: 0 auto 0.8rem; }
 .topbar .brand-mark { height: 26px; margin: 0; }

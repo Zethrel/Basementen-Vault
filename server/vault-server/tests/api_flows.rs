@@ -618,3 +618,279 @@ async fn responses_carry_security_headers() {
     assert_eq!(headers["x-frame-options"], "DENY");
     assert_eq!(headers["referrer-policy"], "no-referrer");
 }
+
+// ---------------------------------------------------------------------------
+// Session (device) management
+
+/// Log in a second "device" for the already-verified account and return its
+/// access + refresh tokens.
+async fn login_device(
+    server: &TestServer,
+    reg: &vault_core::account::Registration,
+    device: &str,
+) -> (String, String) {
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            Some(json!({
+                "email": EMAIL,
+                "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(reg.secrets.auth_key.to_server_credential()),
+                "device_name": device,
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    (
+        body["access_token"].as_str().unwrap().to_string(),
+        body["refresh_token"].as_str().unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn sessions_list_shows_devices_and_current() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+
+    let (access_a, _) = login_device(&server, &reg, "laptop").await;
+    let (_access_b, _) = login_device(&server, &reg, "phone").await;
+
+    let (status, body) = server
+        .request("GET", "/api/v1/sessions", Some(&access_a), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = body["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "two active devices");
+
+    let names: Vec<&str> = sessions
+        .iter()
+        .map(|s| s["device_name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"laptop") && names.contains(&"phone"));
+
+    // Exactly one is flagged current, and it's the laptop (the caller).
+    let current: Vec<&Value> = sessions.iter().filter(|s| s["current"] == true).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0]["device_name"], "laptop");
+}
+
+#[tokio::test]
+async fn revoke_one_device_kills_only_that_session() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+
+    let (access_a, _) = login_device(&server, &reg, "laptop").await;
+    let (access_b, refresh_b) = login_device(&server, &reg, "phone").await;
+
+    // Find the phone's family id from A's session list.
+    let (_, body) = server
+        .request("GET", "/api/v1/sessions", Some(&access_a), None)
+        .await;
+    let phone = body["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["device_name"] == "phone")
+        .unwrap();
+    let phone_family = phone["id"].as_str().unwrap();
+
+    // Revoke the phone from the laptop.
+    let (status, _) = server
+        .request(
+            "DELETE",
+            &format!("/api/v1/sessions/{phone_family}"),
+            Some(&access_a),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Phone's access token no longer works, and its refresh is dead too.
+    let (status, _) = server
+        .request("GET", "/api/v1/vault/keys", Some(&access_b), None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = server
+        .request(
+            "POST",
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": refresh_b })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The laptop is still alive.
+    let (status, _) = server
+        .request("GET", "/api/v1/vault/keys", Some(&access_a), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn revoke_others_logs_out_everyone_else() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+
+    let (access_a, _) = login_device(&server, &reg, "laptop").await;
+    let (access_b, _) = login_device(&server, &reg, "phone").await;
+    let (access_c, _) = login_device(&server, &reg, "tablet").await;
+
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/sessions/revoke-others",
+            Some(&access_a),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["revoked"], 2);
+
+    // The caller survives; the others are gone.
+    for (token, expected) in [
+        (&access_a, StatusCode::OK),
+        (&access_b, StatusCode::UNAUTHORIZED),
+        (&access_c, StatusCode::UNAUTHORIZED),
+    ] {
+        let (status, _) = server
+            .request("GET", "/api/v1/vault/keys", Some(token), None)
+            .await;
+        assert_eq!(status, expected);
+    }
+
+    // Only one session remains.
+    let (_, body) = server
+        .request("GET", "/api/v1/sessions", Some(&access_a), None)
+        .await;
+    assert_eq!(body["sessions"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cannot_revoke_another_accounts_session() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (access_a, _) = login_device(&server, &reg, "laptop").await;
+
+    // A second, separate account.
+    let (other_reg, body) = client_bundle("intruder@example.com", "another password");
+    server
+        .request("POST", "/api/v1/accounts/register", None, Some(body))
+        .await;
+    sqlx::query("UPDATE accounts SET email_verified_at = 1 WHERE email = 'intruder@example.com'")
+        .execute(&server.state.db)
+        .await
+        .unwrap();
+    let (status, other_login) = server
+        .request(
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            Some(json!({
+                "email": "intruder@example.com",
+                "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(other_reg.secrets.auth_key.to_server_credential()),
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let other_access = other_login["access_token"].as_str().unwrap();
+
+    // The intruder learns account A's family id (as if leaked) and tries to
+    // revoke it with the intruder's own valid token. Scoped to account_id,
+    // so it's a no-op → NotFound.
+    let (_, a_sessions) = server
+        .request("GET", "/api/v1/sessions", Some(&access_a), None)
+        .await;
+    let a_family = a_sessions["sessions"][0]["id"].as_str().unwrap();
+    let (status, _) = server
+        .request(
+            "DELETE",
+            &format!("/api/v1/sessions/{a_family}"),
+            Some(other_access),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Account A is untouched.
+    let (status, _) = server
+        .request("GET", "/api/v1/vault/keys", Some(&access_a), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn absolute_lifetime_cap_stops_sliding_refresh() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (_access, refresh) = login_device(&server, &reg, "laptop").await;
+
+    // A normal refresh works.
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": refresh })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let refresh2 = body["refresh_token"].as_str().unwrap().to_string();
+
+    // Force the absolute ceiling into the past for this account's sessions.
+    sqlx::query("UPDATE sessions SET absolute_expires_at = 1")
+        .execute(&server.state.db)
+        .await
+        .unwrap();
+
+    // Now even a valid, unexpired refresh token is refused — re-login required.
+    let (status, _) = server
+        .request(
+            "POST",
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": refresh2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn refresh_updates_last_used_at() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (access, refresh) = login_device(&server, &reg, "laptop").await;
+
+    let _ = access; // the original access token dies on rotation; use the new one
+
+    // Backdate the session so "now" is clearly newer than created_at.
+    sqlx::query("UPDATE sessions SET created_at = 1, last_used_at = 1")
+        .execute(&server.state.db)
+        .await
+        .unwrap();
+
+    let (_, refreshed) = server
+        .request(
+            "POST",
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": refresh })),
+        )
+        .await;
+    let new_access = refreshed["access_token"].as_str().unwrap();
+
+    let (_, body) = server
+        .request("GET", "/api/v1/sessions", Some(new_access), None)
+        .await;
+    let s = &body["sessions"][0];
+    // created_at carried forward (the original login, backdated to 1);
+    // last_used_at advanced to the refresh time.
+    assert_eq!(s["created_at"].as_i64().unwrap(), 1, "login time preserved");
+    assert!(
+        s["last_used_at"].as_i64().unwrap() > s["created_at"].as_i64().unwrap(),
+        "refresh advances last_used_at past created_at"
+    );
+}

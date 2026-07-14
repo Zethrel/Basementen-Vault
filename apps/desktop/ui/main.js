@@ -384,8 +384,73 @@ const accountDialog = $("account-dialog");
 $("btn-account").addEventListener("click", () => {
   $("acc-msg").textContent = "";
   accountDialog.showModal();
+  renderSessions();
 });
 $("acc-close").addEventListener("click", () => accountDialog.close());
+
+// --- active devices ---
+
+async function renderSessions() {
+  const ul = $("session-list");
+  ul.textContent = "";
+  let sessions;
+  try {
+    sessions = await invoke("list_sessions");
+  } catch (e) {
+    const li = document.createElement("li");
+    li.className = "smeta";
+    li.textContent = "Could not load devices: " + String(e);
+    ul.append(li);
+    return;
+  }
+  for (const s of sessions) {
+    const li = document.createElement("li");
+    const info = document.createElement("div");
+    info.className = "grow";
+    const name = document.createElement("div");
+    name.className = "sname";
+    name.textContent = s.device_name || "Unnamed device";
+    const meta = document.createElement("div");
+    meta.className = "smeta";
+    const last = new Date(s.last_used_at * 1000).toLocaleString();
+    meta.textContent = "last active " + last;
+    info.append(name, meta);
+    li.append(info);
+    if (s.current) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "this device";
+      li.append(badge);
+    } else {
+      const btn = document.createElement("button");
+      btn.className = "danger";
+      btn.textContent = "Revoke";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await invoke("revoke_session", { id: s.id });
+          await renderSessions();
+        } catch (e) {
+          btn.disabled = false;
+          $("acc-msg").textContent = String(e);
+        }
+      });
+      li.append(btn);
+    }
+    ul.append(li);
+  }
+}
+$("sessions-refresh").addEventListener("click", () => renderSessions());
+$("sessions-revoke-others").addEventListener("click", async () => {
+  if (!confirm("Log out every other device? They will need to sign in again.")) return;
+  try {
+    const n = await invoke("revoke_other_sessions");
+    $("acc-msg").textContent = `Logged out ${n} other device(s).`;
+    await renderSessions();
+  } catch (e) {
+    $("acc-msg").textContent = String(e);
+  }
+});
 
 async function backupEmailAction(action) {
   $("acc-msg").textContent = "";

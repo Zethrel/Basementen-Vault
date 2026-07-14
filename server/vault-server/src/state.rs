@@ -104,6 +104,8 @@ impl FromRequestParts<AppState> for ClientIp {
 pub struct AuthSession {
     pub account_id: i64,
     pub session_id: i64,
+    /// The session family (one per login); stable across token rotations.
+    pub family_id: String,
 }
 
 impl FromRequestParts<AppState> for AuthSession {
@@ -123,19 +125,24 @@ impl FromRequestParts<AppState> for AuthSession {
         let hash = security::sha256(token.as_bytes());
         let now = security::now();
 
-        let row: Option<(i64, i64)> = sqlx::query_as(
-            "SELECT id, account_id FROM sessions
-             WHERE access_token_hash = ? AND revoked_at IS NULL AND access_expires_at > ?",
+        // Valid = not revoked, access token unexpired, and within the absolute
+        // session ceiling (NULL ceiling = legacy row, treated as uncapped).
+        let row: Option<(i64, i64, String)> = sqlx::query_as(
+            "SELECT id, account_id, family_id FROM sessions
+             WHERE access_token_hash = ? AND revoked_at IS NULL AND access_expires_at > ?
+               AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)",
         )
         .bind(&hash)
+        .bind(now)
         .bind(now)
         .fetch_optional(&state.db)
         .await?;
 
-        let (session_id, account_id) = row.ok_or(ApiError::InvalidToken)?;
+        let (session_id, account_id, family_id) = row.ok_or(ApiError::InvalidToken)?;
         Ok(AuthSession {
             account_id,
             session_id,
+            family_id,
         })
     }
 }

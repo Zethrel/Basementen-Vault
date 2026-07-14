@@ -9,6 +9,9 @@ use crate::{db, security, totp};
 
 pub const ACCESS_TOKEN_TTL_SECS: i64 = 15 * 60;
 pub const REFRESH_TOKEN_TTL_SECS: i64 = 30 * 24 * 3600;
+/// Hard ceiling on a session's lifetime regardless of activity. After this,
+/// sliding refresh stops working and the user must log in again.
+pub const ABSOLUTE_SESSION_TTL_SECS: i64 = 90 * 24 * 3600;
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -185,19 +188,25 @@ async fn consume_recovery_code(
     Ok(updated.rows_affected() == 1)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_session_row(
     state: &AppState,
     account_id: i64,
     family_id: &str,
     device_name: &str,
     now: i64,
+    // The family's original login time, carried unchanged through rotations so
+    // the device list shows when the device logged in, not when it last refreshed.
+    created_at: i64,
+    absolute_expires_at: i64,
 ) -> Result<(String, String), ApiError> {
     let (access, access_hash) = security::new_token("bvat_");
     let (refresh, refresh_hash) = security::new_token("bvrt_");
     sqlx::query(
         "INSERT INTO sessions (account_id, family_id, access_token_hash, refresh_token_hash,
-                               access_expires_at, refresh_expires_at, device_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                               access_expires_at, refresh_expires_at, device_name, created_at,
+                               last_used_at, absolute_expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(account_id)
     .bind(family_id)
@@ -206,7 +215,9 @@ async fn insert_session_row(
     .bind(now + ACCESS_TOKEN_TTL_SECS)
     .bind(now + REFRESH_TOKEN_TTL_SECS)
     .bind(device_name)
+    .bind(created_at)
     .bind(now)
+    .bind(absolute_expires_at)
     .execute(&state.db)
     .await?;
     Ok((access, refresh))
@@ -218,6 +229,14 @@ async fn create_session(
     device_name: Option<&str>,
     now: i64,
 ) -> Result<(String, String), ApiError> {
+    // Purge this account's dead sessions (past the refresh window, so beyond
+    // any reuse-detection value) to keep the table from growing unbounded.
+    let _ = sqlx::query("DELETE FROM sessions WHERE account_id = ? AND refresh_expires_at < ?")
+        .bind(account_id)
+        .bind(now)
+        .execute(&state.db)
+        .await;
+
     // Random family ID grouping every future rotation of this login.
     let (family_id, _) = security::new_token("fam_");
     insert_session_row(
@@ -226,6 +245,8 @@ async fn create_session(
         &family_id,
         device_name.unwrap_or(""),
         now,
+        now,
+        now + ABSOLUTE_SESSION_TTL_SECS,
     )
     .await
 }
@@ -245,16 +266,28 @@ pub async fn refresh(
     let now = security::now();
     let hash = security::sha256(req.refresh_token.as_bytes());
 
-    let row: Option<(i64, i64, String, String, Option<i64>, i64)> = sqlx::query_as(
-        "SELECT id, account_id, family_id, device_name, revoked_at, refresh_expires_at
+    // (id, account_id, family_id, device_name, revoked_at, refresh_expires_at,
+    //  absolute_expires_at, created_at)
+    type RefreshRow = (i64, i64, String, String, Option<i64>, i64, Option<i64>, i64);
+    let row: Option<RefreshRow> = sqlx::query_as(
+        "SELECT id, account_id, family_id, device_name, revoked_at, refresh_expires_at,
+                absolute_expires_at, created_at
          FROM sessions WHERE refresh_token_hash = ?",
     )
     .bind(&hash)
     .fetch_optional(&state.db)
     .await?;
 
-    let Some((session_id, account_id, family_id, device_name, revoked_at, refresh_expires_at)) =
-        row
+    let Some((
+        session_id,
+        account_id,
+        family_id,
+        device_name,
+        revoked_at,
+        refresh_expires_at,
+        absolute_expires_at,
+        created_at,
+    )) = row
     else {
         security::failure_delay().await;
         return Err(ApiError::InvalidToken);
@@ -278,10 +311,15 @@ pub async fn refresh(
         security::failure_delay().await;
         return Err(ApiError::InvalidToken);
     }
-    if refresh_expires_at <= now {
+    // Refresh window expired, or the absolute session ceiling reached: the
+    // user must log in again. The absolute cap is carried unchanged through
+    // rotations, so sliding refresh cannot extend a session past it.
+    if refresh_expires_at <= now || absolute_expires_at.is_some_and(|cap| cap <= now) {
         security::failure_delay().await;
         return Err(ApiError::InvalidToken);
     }
+    // Carry the same ceiling forward (default for legacy rows without one).
+    let absolute_expires_at = absolute_expires_at.unwrap_or(now + ABSOLUTE_SESSION_TTL_SECS);
 
     // Rotate: retire this row, issue a successor in the same family.
     sqlx::query("UPDATE sessions SET revoked_at = ? WHERE id = ?")
@@ -289,8 +327,16 @@ pub async fn refresh(
         .bind(session_id)
         .execute(&state.db)
         .await?;
-    let (access, refresh) =
-        insert_session_row(&state, account_id, &family_id, &device_name, now).await?;
+    let (access, refresh) = insert_session_row(
+        &state,
+        account_id,
+        &family_id,
+        &device_name,
+        now,
+        created_at,
+        absolute_expires_at,
+    )
+    .await?;
 
     Ok(Json(json!({
         "access_token": access,

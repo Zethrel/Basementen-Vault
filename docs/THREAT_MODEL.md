@@ -68,6 +68,39 @@ failures, owner notified) and a per-IP budget (20/15 min). Unknown accounts
 burn the same Argon2id work as real ones (dummy-hash equalization), and
 registration/recovery/prelogin responses are enumeration-safe.
 
+### A4b — Attacker with a stolen session token
+
+Bearer tokens are password-equivalent for their lifetime, so the design
+minimizes that lifetime and makes every token revocable:
+
+- **Access token:** opaque 256-bit random, stored server-side only as its
+  SHA-256, 15-minute TTL. A leaked access token works for at most 15 minutes
+  and can be killed instantly by revoking its session.
+- **Refresh token:** opaque, hashed, 30-day sliding TTL, **single-use**. Each
+  use rotates both tokens; presenting an already-rotated refresh token is
+  treated as theft and **revokes the whole session family** (all descendants
+  of that login). So a stolen refresh token is either caught (if the victim
+  refreshes and the thief replays → family killed) or the thief's own use
+  invalidates the victim's copy (victim's next refresh → family killed).
+- **Absolute lifetime cap:** 90 days from login, carried unchanged through
+  rotations, so sliding refresh cannot keep a compromised session alive
+  indefinitely — re-login (and thus the master password + MFA) is forced.
+- **Revocation:** the user can list active devices (`GET /sessions`) and
+  revoke any one (`DELETE /sessions/{family}`) or all others
+  (`POST /sessions/revoke-others`) from the app; recovery and (future)
+  password change revoke every session.
+- Tokens are server-generated random values, never client-supplied, so there
+  is no session fixation. The API authenticates via the `Authorization`
+  header, not cookies, so CSRF does not apply.
+
+**Residual risk:** within a stolen access token's ≤15-minute window, before
+detection/revocation, the thief can read the encrypted vault blobs (still
+useless without the master password) and metadata. True proof-of-possession
+binding (DPoP / mTLS) would close the bearer-replay window entirely but is a
+large feature; for a self-hosted vault behind TLS/VPN the short TTL +
+rotation + revocation is the accepted v1 posture. Tracked as a possible
+enhancement.
+
 ### A5 — Attacker with the victim's e-mail inbox
 
 Can start recovery. Cannot complete a data-preserving recovery (needs the
@@ -160,6 +193,7 @@ Ordered roughly by priority for post-v1 work.
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
 | Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |
 | `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart (a weak cross-restart enumeration signal). Persisting the secret closes it; deferred, consistent with the existing per-process `dummy_hash`. |
+| Bearer access tokens are replayable for ≤15 min | Low | Sender-constrained tokens (DPoP proof-of-possession or mTLS) would eliminate the replay window (§A4b). Deferred; short TTL + rotation + revocation is the v1 posture. |
 | Mobile Argon2 parameters possibly conservative | Low | Floor is `m=19 MiB, t=2, p=1`; desktop `m=64 MiB, t=3, p=4`. Benchmark real unlock times per device class and raise toward `m=64–128 MiB` where UX allows — reviewer note. Parameters are per-account and versioned, so raising them later is a normal password-change (`RUNBOOK.md` §KDF migration). |
 | E-mail inbox compromise enables wipe-after-72h | Accepted | By design (§A5): disclosure is worse than denial. |
 | External security audit | **Blocker** | **Required before real-world use** — see RUNBOOK. |

@@ -54,12 +54,16 @@ Never lower `MIN_*` floors; the server rejects sub-floor registrations.
 
 **Lost/stolen user device**
 
-1. From any other logged-in device: nothing to do server-side yet (device
-   revocation UI is backlog); revoke that device's sessions via SQL as above,
-   filtered by `device_name`.
+1. From any other logged-in device: open ⚙ → **Active devices**, find the
+   lost device, and click **Revoke** (or **Log out all other devices**). That
+   immediately kills its access and refresh tokens server-side. (Admin
+   fallback: `UPDATE sessions SET revoked_at = strftime('%s','now') WHERE
+   account_id = ? AND device_name = ? AND revoked_at IS NULL;`)
 2. The local replica on the stolen device is ciphertext; the master password
    still gates it. If the master password may be known, change it — that
    re-wraps the vault key and invalidates the old wrapped copy everywhere.
+3. Even if a device is never revoked, its session self-expires at the absolute
+   90-day cap, and its access token every 15 minutes.
 
 **User locked out (forgot password)**
 
