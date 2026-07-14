@@ -15,6 +15,9 @@ zeroize = { version = "1", features = ["derive"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 subtle = "2"
 thiserror = "2"
+# Cross-platform mlock/VirtualLock for key pages; its internal `unsafe` keeps
+# the syscall out of our `forbid(unsafe)` crates.
+region = "3"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

@@ -101,21 +101,24 @@ on **both** client derivation and server-side registration.
 - **Guarded by:** `crypto_flows::kdf_rejects_parameters_below_floor`;
   `proptests::kdf_params_validation_total` (total over the `u32` space).
 
-### I8 — Secret material is zeroized and never `Debug`-printed
-Key types are `#[derive(Zeroize, ZeroizeOnDrop)]`; transient plaintext buffers
-use `Zeroizing`; **decrypted item plaintext is scrubbed** (`decrypt_item`
-returns `Zeroizing<Vec<u8>>`, the decrypted `Item` model is `ZeroizeOnDrop`);
-every secret's `Debug` prints `<redacted>` (keys, `AccountSecrets`, and `Item`);
-key equality is constant-time.
-- **Enforced:** `keys.rs` (`key_type!` macro; subkey scratch is `Zeroizing`),
+### I8 — Secret material is zeroized, page-locked, and never `Debug`-printed
+Key types are backed by `secmem::SecretBytes` — a **page-locked**
+(`mlock`/`VirtualLock`, best-effort) heap buffer that **zeroizes on drop**;
+transient plaintext buffers use `Zeroizing`; **decrypted item plaintext is
+scrubbed** (`decrypt_item` returns `Zeroizing<Vec<u8>>`, the decrypted `Item`
+model is `ZeroizeOnDrop`); every secret's `Debug` prints `<redacted>` (keys,
+`AccountSecrets`, and `Item`); key equality is constant-time.
+- **Enforced:** `secmem.rs` (`SecretBytes` lock + zeroize), `keys.rs`
+  (`key_type!` macro over `SecretBytes`; subkey scratch is `Zeroizing`),
   `account.rs` (`AccountSecrets` Debug), `kdf.rs`/`export.rs`/`item.rs`
   (`Zeroizing`), `desktop-core::items::Item` (`ZeroizeOnDrop` + redacted Debug),
   Tauri command password args wrapped in `Zeroizing`.
-- **Guarded by:** compile-time (`Debug`/`ZeroizeOnDrop` impls) +
+- **Guarded by:** compile-time (`Debug`/`Drop` impls) + `secmem::tests` +
   `items::tests::debug_never_prints_secret_fields` + `unsafe_code = "forbid"`
-  workspace-wide. See `THREAT_MODEL.md` §A6 for the full in-memory-plaintext
-  map and the honest limits (the JS-heap residual, no page locking / core-dump
-  suppression yet).
+  in every first-party crate (the `mlock` syscall's `unsafe` lives in the
+  `region` dependency). See `THREAT_MODEL.md` §A6 for the full
+  in-memory-plaintext map and the honest limits (the JS-heap residual;
+  core-dump suppression not done yet).
 
 ### I9 — No plaintext secret is written to logs
 Server logging never includes passwords, credentials, keys, tokens, or vault

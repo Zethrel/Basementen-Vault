@@ -361,6 +361,26 @@ so no forced migration is needed. Residual: long notes still leak their size to
 option). Spec in CRYPTOGRAPHIC_INVARIANTS §Item record format; guarded by four
 new tests.
 
+## Post-milestone hardening — key-page locking (2026-07)
+
+Closed the `mlock` gap (THREAT_MODEL §A6, was "Not done / Medium"). Every key
+type now stores its bytes in `secmem::SecretBytes` — a heap allocation whose
+backing page is locked out of swap (`mlock`/`VirtualLock`) and zeroized on
+drop — so key material is pinned in RAM and never written to a swap file or
+hibernation image. Notes:
+
+- **No new first-party `unsafe`.** The syscall lives in the small, widely-used
+  `region` crate behind a safe API, so `forbid(unsafe)` still holds for every
+  crate we write (called out in THREAT_MODEL §A7).
+- **Neighbour-safe locking.** `SecretBytes` allocates two pages and locks the
+  one page fully contained inside them, so locking/unlocking never touches
+  another allocation's memory (which could otherwise unlock a neighbour's key
+  when one drops). Guarded by `secmem::tests`.
+- **Best-effort.** If the OS refuses (e.g. `RLIMIT_MEMLOCK`, or a container
+  ulimit), the key still works — just unpinned. RUNBOOK now tells operators how
+  to raise the locked-memory budget and how to disable core dumps (the one
+  remaining §A6 item).
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

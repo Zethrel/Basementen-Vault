@@ -203,25 +203,23 @@ desktop parameters). Auto-lock (15 min idle) zeroizes keys in memory;
 clipboard auto-clears 30 s after copying a secret.
 
 **Memory-protection posture (as built, with honest limits).** What we do:
-key types are `Zeroize`/`ZeroizeOnDrop`, transient plaintext uses
-`Zeroizing`, dropping the session on lock/auto-lock scrubs the keys,
-`unsafe_code = "forbid"` rules out whole classes of memory bugs, and the
-clipboard clear only fires if the clipboard still holds the copied secret
-(never clobbers newer content). What we do **not** yet do, and the resulting
-exposure:
+key types are zeroize-on-drop *and* **page-locked** (`mlock`/`VirtualLock`),
+transient plaintext uses `Zeroizing`, dropping the session on lock/auto-lock
+scrubs the keys, `unsafe_code = "forbid"` rules out whole classes of memory
+bugs, and the clipboard clear only fires if the clipboard still holds the
+copied secret (never clobbers newer content). Status of each vector:
 
 | Vector | Status | Note |
 |---|---|---|
 | Compiler reordering defeating zeroization | Mitigated | `zeroize` uses volatile writes + compiler fences by design |
-| Locking key pages out of swap (`mlock`) | **Not done** | Keys can be paged to disk under memory pressure. Mitigation: encrypted swap at the OS level (operator responsibility; note in RUNBOOK). |
-| Suppressing core dumps / crash dumps | **Not done** | A crash could write key-bearing memory to a dump file. |
-| Panic-path scrubbing | Partial | `ZeroizeOnDrop` runs during unwinding; a hard abort does not unwind. |
+| Locking key pages out of swap (`mlock`) | **Done (best-effort)** | Every key type is backed by `secmem::SecretBytes`, a page-locked heap allocation (`mlock`/`VirtualLock` via the `region` crate). Keys are pinned in RAM, not written to swap/hibernation. Best-effort: if the OS refuses (e.g. `RLIMIT_MEMLOCK`), the key still works, just unpinned. The syscall's `unsafe` is inside `region`, so `forbid(unsafe)` stands. |
+| Suppressing core dumps / crash dumps | **Not done** | A crash could write key-bearing memory to a dump file. Tracked below; operator mitigation (disable core dumps) in RUNBOOK. |
+| Panic-path scrubbing | Partial | Drop-based scrub runs during unwinding; a hard abort does not unwind. |
 | Clipboard history managers / OS sync | Out of app control | The app clears its own write; third-party clipboard managers may retain it. Documented for users. |
 
 These are the standard limits of a userspace password manager and match the
 posture of mainstream products; they are listed here so an auditor sees them
-stated, not hidden. Page-locking and core-dump suppression are tracked
-below.
+stated, not hidden. Core-dump suppression is the remaining item, tracked below.
 
 **In-memory-plaintext map (audit, 2026-07).** Every place a plaintext secret
 lives in the *Rust* process, how long, and whether it is scrubbed:
@@ -229,7 +227,7 @@ lives in the *Rust* process, how long, and whether it is scrubbed:
 | Secret | Where | Lifetime | Scrubbed? |
 |--------|-------|----------|-----------|
 | Master password / export passphrase | `String` arg into a Tauri command | one command call | **Yes** — wrapped in `Zeroizing` at entry |
-| Master Key, Auth/Wrapping/Vault/Recovery keys | `keys.rs` key types | unlock → lock | **Yes** — `Zeroize`+`ZeroizeOnDrop`; subkey scratch is `Zeroizing` |
+| Master Key, Auth/Wrapping/Vault/Recovery keys | `keys.rs` key types (page-locked `SecretBytes`) | unlock → lock | **Yes** — zeroize-on-drop *and* `mlock`'d out of swap; subkey scratch is `Zeroizing` |
 | KDF Argon2id output buffer | `derive_master_key` | derivation only | **Yes** — `Zeroizing` |
 | Decrypted item bytes | `decrypt_item` result | until caller drops | **Yes** — returns `Zeroizing<Vec<u8>>` |
 | Decrypted `Item` (password, card #, notes) | `Item` model | while displayed/edited server-side | **Yes** — `ZeroizeOnDrop`; `Debug` redacted |
@@ -267,6 +265,13 @@ window; it does not close it against a live attacker on the device.
 Crypto is confined to audited RustCrypto crates; `unsafe_code = "forbid"`
 workspace-wide; RustSec `cargo audit` in CI; `Cargo.lock` committed; no
 frontend package dependencies at all (plain JS, CSP `default-src 'self'`).
+
+Our own code contains no `unsafe`. The one operation that inherently needs a
+raw syscall — locking key pages out of swap (`mlock`/`VirtualLock`) — is
+delegated to the small, widely-used `region` crate, which encapsulates that
+`unsafe` behind a safe API. This keeps `forbid(unsafe)` intact for every
+first-party crate while still getting the syscall; `region` is in scope for
+`cargo audit` like any other dependency.
 
 ## Metadata integrity — what is authenticated
 
@@ -311,7 +316,7 @@ Ordered roughly by priority for post-v1 work.
 | Item-size metadata leak | **Mitigated** | Implemented as `EncryptedItem` v2: plaintext is length-prefixed and zero-padded to 256-byte buckets before encryption, so ciphertext length reveals only a bucket. v1 records migrate on next write. Residual: long notes still leak size to 256-byte granularity (a future larger floor / exponential bucketing could tighten it). §Item record format in CRYPTOGRAPHIC_INVARIANTS. |
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
-| Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |
+| Core dumps / crash dumps not suppressed | Medium | A crash could write key-bearing memory to a dump. Key pages are now `mlock`'d out of swap (§A6, done); core-dump suppression is the remaining item. Operator mitigation (disable core dumps) in RUNBOOK. |
 | Plaintext secrets in the WebView / JS heap | Medium | Inherent to a web-UI password manager: secrets shown/edited live in the JS heap until the view closes, beyond Rust's zeroization. Closing it needs a native-widget or WASM-core UI. Rust-side lifetime is now fully scrubbed (§A6 in-memory map). |
 | `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart. See the exploitability analysis below — it is not practically exploitable; persisting the secret closes even the theoretical signal. Deferred, consistent with the existing per-process `dummy_hash`. |
 | Bearer access tokens are replayable for ≤15 min | Low | Sender-constrained tokens (DPoP proof-of-possession or mTLS) would eliminate the replay window (§A4b). Deferred; short TTL + rotation + revocation is the v1 posture. |

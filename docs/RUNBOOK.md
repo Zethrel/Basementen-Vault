@@ -100,13 +100,25 @@ consider raising `BV_RECOVERY_COOLOFF_HOURS`.
 
 ## Host hardening for client devices
 
-The app zeroizes keys in memory on lock, but userspace cannot fully prevent
-key-bearing memory from reaching disk. Recommend to users:
+The app zeroizes keys on lock and **locks key pages out of swap**
+(`mlock`/`VirtualLock`), so under normal conditions key material is pinned in
+RAM and not paged to disk. Locking is best-effort; these steps close the
+remaining gaps:
 
-- **Enable full-disk or encrypted swap.** Under memory pressure the OS may
-  page process memory (including keys) to swap; encrypted swap neutralizes
-  that. macOS encrypts swap by default; Linux users should use an encrypted
-  swap partition or `zram`; Windows users should enable BitLocker.
+- **Give the app enough locked-memory budget.** On Linux the lock needs
+  `RLIMIT_MEMLOCK` headroom (only a few pages — tens of KB). Desktop sessions
+  usually have plenty; if you run the client in a **container** or under a
+  tight ulimit, raise it (e.g. Docker `--ulimit memlock=67108864`, or
+  `LimitMEMLOCK=64M` in a systemd unit) or the keys silently fall back to
+  unpinned. The app never fails to unlock because of this.
+- **Enable full-disk or encrypted swap** anyway, as defence in depth for the
+  best-effort case and for any non-key plaintext. macOS encrypts swap by
+  default; Linux users should use an encrypted swap partition or `zram`;
+  Windows users should enable BitLocker.
+- **Disable core dumps for the app** so a crash can't write key-bearing memory
+  to a dump file (core-dump suppression is not yet built in): Linux
+  `ulimit -c 0` / `LimitCORE=0` in a systemd unit; macOS `launchctl limit
+  core 0`.
 - **Rely on OS full-disk encryption** (FileVault / LUKS / BitLocker) so the
   local ciphertext replica and any crash dumps are protected at rest.
 

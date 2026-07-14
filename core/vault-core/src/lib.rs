@@ -39,6 +39,7 @@ pub mod item;
 pub mod kdf;
 pub mod keys;
 pub mod recovery;
+mod secmem;
 
 pub use account::{AccountSecrets, RegistrationBundle};
 pub use envelope::WrappedKey;

@@ -2,7 +2,9 @@ use hkdf::Hkdf;
 use rand_core::{OsRng, RngCore};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
+
+use crate::secmem::SecretBytes;
 
 pub const KEY_LEN: usize = 32;
 
@@ -16,16 +18,23 @@ const INFO_SYNC_CHECKPOINT: &[u8] = b"basementen-vault/v1/sync-checkpoint";
 macro_rules! key_type {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
-        #[derive(Clone, Zeroize, ZeroizeOnDrop)]
-        pub struct $name([u8; KEY_LEN]);
+        ///
+        /// Backed by [`SecretBytes`]: the bytes live in a page-locked
+        /// (`mlock`'d), zeroize-on-drop heap allocation, so key material is
+        /// pinned in RAM and never paged to swap.
+        #[derive(Clone)]
+        pub struct $name(SecretBytes);
 
         impl $name {
-            pub(crate) fn from_bytes(bytes: [u8; KEY_LEN]) -> Self {
-                Self(bytes)
+            pub(crate) fn from_bytes(mut bytes: [u8; KEY_LEN]) -> Self {
+                let key = Self(SecretBytes::new(&bytes));
+                // Scrub the transient input copy; only the locked buffer keeps it.
+                bytes.zeroize();
+                key
             }
 
             pub(crate) fn as_bytes(&self) -> &[u8; KEY_LEN] {
-                &self.0
+                self.0.as_array()
             }
         }
 
@@ -103,7 +112,9 @@ impl VaultKey {
     pub fn generate() -> Self {
         let mut bytes = [0u8; KEY_LEN];
         OsRng.fill_bytes(&mut bytes);
-        Self(bytes)
+        let key = Self::from_bytes(bytes);
+        bytes.zeroize();
+        key
     }
 
     /// Recovery verifier: a value derivable only by someone who holds the
@@ -150,7 +161,9 @@ impl RecoveryKey {
     pub fn generate() -> Self {
         let mut bytes = [0u8; KEY_LEN];
         OsRng.fill_bytes(&mut bytes);
-        Self(bytes)
+        let key = Self::from_bytes(bytes);
+        bytes.zeroize();
+        key
     }
 }
 
