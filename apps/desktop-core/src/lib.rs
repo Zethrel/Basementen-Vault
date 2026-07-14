@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod generator;
+pub mod hibp;
 pub mod items;
 pub mod password;
 pub mod rollback;
@@ -16,6 +17,7 @@ pub mod transfer;
 
 pub use api::{ApiClient, ApiError, LoginOutcome, PreloginInfo, RecoveryData, SessionInfo};
 pub use generator::{generate_password, GeneratorOptions};
+pub use hibp::{password_breach_count, HibpError};
 pub use items::{Item, ItemSummary};
 pub use password::{check_password_strength, MIN_PASSWORD_LEN};
 pub use rollback::{synchronize, SyncError};

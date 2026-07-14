@@ -24,13 +24,16 @@ Can do: offline guessing against the stacked KDFs, at ~full password-cracking
 cost per account per guess. Cannot: decrypt anything, mint sessions (tokens
 are stored hashed), or forge recovery (verifier stored hashed).
 
-**Residual risk:** weak master passwords. Mitigated by a client-side strength
-policy at every point the master password is set (registration and recovery):
-≥12 characters, plus at least one capital letter, one number, and one special
-character (`desktop_core::check_password_strength`). A breached-password (HIBP
-k-anonymity) check and `zxcvbn`-style entropy scoring remain complementary
-backlog items — composition rules catch trivially weak inputs but not a
-long-but-breached passphrase.
+**Residual risk:** weak master passwords. Mitigated at every point the master
+password is set (registration and recovery) by two client-side checks:
+(1) a composition policy — ≥12 characters plus at least one capital letter, one
+number, and one special character (`desktop_core::check_password_strength`); and
+(2) a **breached-password check** against Have I Been Pwned using k-anonymity
+(`desktop_core::password_breach_count`) — only a 5-hex-char SHA-1 prefix leaves
+the device, and a match is rejected. The breach check is best-effort: if HIBP is
+unreachable (offline / blocked), registration still proceeds on the composition
+policy alone. `zxcvbn`-style entropy scoring remains a complementary backlog
+item (catches "Password1!"-shaped inputs that pass both checks).
 
 ### A2 — Malicious or compromised server (active)
 
@@ -321,7 +324,7 @@ Ordered roughly by priority for post-v1 work.
 | Whole-vault rollback by malicious server | **Mitigated** | Implemented: per-device monotonic guard + vault-key-MAC'd cross-device checkpoint + withholding detection (§A2). Only the first-sync-of-a-fresh-install-with-no-anchor case remains (narrow residual, §A2). |
 | Item-size metadata leak | **Mitigated** | Implemented as `EncryptedItem` v2: plaintext is length-prefixed and zero-padded to 256-byte buckets before encryption, so ciphertext length reveals only a bucket. v1 records migrate on next write. Residual: long notes still leak size to 256-byte granularity (a future larger floor / exponential bucketing could tighten it). §Item record format in CRYPTOGRAPHIC_INVARIANTS. |
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
-| No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Low | Composition rules are now enforced client-side (≥12 chars + capital + number + special, at registration *and* recovery). Still backlog: HIBP breached-password check via SHA-1 k-anonymity (prefix query; password never leaves the device) and `zxcvbn` entropy scoring, which catch long-but-weak/breached passphrases that composition rules miss. |
+| `zxcvbn` entropy scoring at registration | Low | Composition rules (≥12 + capital + number + special) **and** a HIBP breached-password check (SHA-1 k-anonymity; only a 5-char prefix leaves the device) are now enforced client-side at registration *and* recovery. Still backlog: `zxcvbn`-style entropy scoring, which would additionally flag structurally weak-but-unbreached inputs (e.g. keyboard walks). |
 | Windows crash dumps (WER) not suppressed in-app | Low | On unix, core dumps are suppressed at startup (§A6, done). On Windows, Windows Error Reporting can still capture a crash dump; the app can't fully disable WER from userspace, so operators disable it via policy/registry (RUNBOOK). Keys are still `mlock`'d, limiting what lands in a dump. |
 | Plaintext secrets in the WebView / JS heap | Medium | Inherent to a web-UI password manager: secrets shown/edited live in the JS heap until the view closes, beyond Rust's zeroization. Closing it needs a native-widget or WASM-core UI. Rust-side lifetime is now fully scrubbed (§A6 in-memory map). |
 | `prelogin` enumeration secret is per-process | **Closed** | The enumeration secret is now persisted in the database (`server_secrets` table, `db::load_or_create_secret`) and reloaded on boot, so an unregistered address's dummy KDF salt is identical before and after a restart — the cross-restart signal analysed below no longer exists. (`dummy_hash` stays per-process by design: its value never leaves the server, so it carries no such signal.) Guarded by `enumeration_secret_persists_across_restarts`. |

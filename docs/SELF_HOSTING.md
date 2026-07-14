@@ -102,6 +102,18 @@ point — so keep the printed Recovery Kit somewhere safe.
   key, stored only as a hash).
 - Every completed recovery revokes all sessions and notifies all addresses.
 
+## Outbound calls from the app
+
+The desktop/mobile app itself makes one third-party call you should know about:
+when a **new master password is set** (registration or recovery), it checks that
+password against Have I Been Pwned. This uses **k-anonymity** — only the first
+5 hex characters of the password's SHA-1 are sent to `api.pwnedpasswords.com`,
+and the match happens locally — so the password (and its full hash) never leave
+the device. The check is **best-effort**: if that host is unreachable (a fully
+offline/air-gapped deployment, or a firewall rule), the app silently skips it
+and relies on the composition policy. There is no other automatic third-party
+traffic; all vault sync goes only to your own server.
+
 ## Hardening checklist
 
 - [ ] Server bound to localhost/VPN only, or behind Caddy with TLS

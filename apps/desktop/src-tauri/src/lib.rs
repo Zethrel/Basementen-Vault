@@ -42,6 +42,21 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// Reject a password found in known breaches (privacy-preserving HIBP
+/// k-anonymity check). Best-effort: a positive match blocks, but if the service
+/// is unreachable (offline / self-hosted with no outbound access) we proceed —
+/// the strength policy already gates, and registration must not require the
+/// internet.
+async fn reject_if_breached(password: &str) -> Result<(), String> {
+    if let Ok(Some(count)) = desktop_core::password_breach_count(password).await {
+        return Err(format!(
+            "This password appears in {count} known data breaches — please choose a \
+             different one. Only a short, anonymized hash prefix was sent to check this."
+        ));
+    }
+    Ok(())
+}
+
 const REFRESH_TOKEN_ID: &str = "__meta/refresh_token";
 
 fn encrypt_refresh_token(
@@ -152,6 +167,7 @@ async fn register(
 ) -> Result<RegisterResult, String> {
     let password = Zeroizing::new(password);
     desktop_core::check_password_strength(&password)?;
+    reject_if_breached(&password).await?;
     let reg =
         vault_core::account::register(&password, vault_core::KdfParams::desktop()).map_err(err)?;
     let api = ApiClient::new(&server_url);
@@ -481,6 +497,7 @@ async fn recover_complete(
     let new_password = Zeroizing::new(new_password);
     let recovery_code = recovery_code.map(Zeroizing::new);
     desktop_core::check_password_strength(&new_password)?;
+    reject_if_breached(&new_password).await?;
     let api = ApiClient::new(&server_url);
     let data = api.recovery_data(&token).await.map_err(|e| match e {
         desktop_core::ApiError::CoolingOff { retry_after_secs } => format!(

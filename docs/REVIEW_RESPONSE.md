@@ -430,6 +430,24 @@ a long-but-breached passphrase. The stronger complements — a Have I Been Pwned
 k-anonymity check and `zxcvbn` entropy scoring — remain backlog (THREAT_MODEL
 gaps), now downgraded to Low since basic strength is enforced.
 
+## Post-milestone hardening — breached-password check (2026-07)
+
+Added the Have I Been Pwned breached-password check that had been backlog,
+complementing the composition policy. When a master password is set
+(registration or recovery), `desktop_core::password_breach_count` looks it up
+via **k-anonymity**: the client SHA-1s the password and sends only the first
+5 hex characters to the HIBP range API, then matches the returned 35-char
+suffixes locally. The password and its full hash never leave the device; the
+service sees only a ~1-in-a-million-buckets prefix. `Add-Padding: true` hides
+which prefix was requested from response-size analysis; zero-count padding rows
+are ignored. A match is rejected with a count; a network failure is **ignored**
+so an offline/air-gapped deployment can still register (the composition policy
+still gates). The one outbound call is documented in SELF_HOSTING for operator
+transparency. Guarded by `hibp::tests` (pure prefix/suffix + response parsing).
+
+This leaves only `zxcvbn`-style entropy scoring on the password-strength gap
+(Low) — structurally weak but unbreached inputs.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

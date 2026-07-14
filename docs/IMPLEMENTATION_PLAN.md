@@ -110,12 +110,15 @@ master password + random per-account salt (from prelogin)
    strength policy (`desktop_core::check_password_strength`) — ≥ 12 characters
    plus at least one capital letter, one number, and one special character —
    applied at registration *and* recovery (so recovery can't set a weaker
-   password). Enforcement is client-side by necessity: the server is
-   zero-knowledge and never receives the password. **Backlog:** local `zxcvbn`
-   strength scoring and a Have I Been Pwned k-anonymity check (queried by
-   SHA-1 prefix so the password itself never leaves the device), which catch
-   long-but-breached passphrases that composition rules miss. Tracked in
-   `THREAT_MODEL.md` §Known gaps.
+   password), *and* a **Have I Been Pwned breached-password check**
+   (`desktop_core::password_breach_count`) using k-anonymity — the client sends
+   only the first 5 hex chars of the password's SHA-1 and matches the returned
+   suffixes locally, so the password never leaves the device; a match is
+   rejected. The breach check is best-effort (skipped if HIBP is unreachable,
+   e.g. an offline deployment). Enforcement is client-side by necessity: the
+   server is zero-knowledge and never receives the password. **Backlog:** local
+   `zxcvbn` entropy scoring for structurally weak-but-unbreached inputs. Tracked
+   in `THREAT_MODEL.md` §Known gaps.
 2. Client derives MK → AuthKey + WrappingKey, generates VK, wraps VK.
 3. Client sends: e-mail, AuthKey, wrapped VK, KDF parameters.
 4. Server Argon2id-hashes the AuthKey, stores the record, and sends a
