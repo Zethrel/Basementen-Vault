@@ -465,6 +465,30 @@ and rejects a password equal to a supplied user input).
 With composition rules + HIBP breach check + zxcvbn scoring all in place, the
 master-password-strength gap is **closed** for v1 (THREAT_MODEL gaps table).
 
+## v1-readiness — MFA enrollment in the app (2026-07)
+
+A pre-1.0 review found that TOTP was fully implemented server-side and in the
+client library but **not reachable from the app UI** — an advertised security
+feature users couldn't actually turn on. Now wired end to end:
+
+- ApiClient gains `totp_enroll` / `totp_activate` / `totp_disable` (joining the
+  existing `mfa_status` / `regenerate_recovery_codes`).
+- New Tauri commands `mfa_status`, `totp_enroll`, `totp_activate`,
+  `totp_disable`, `regenerate_recovery_codes`; enroll/disable/regenerate are
+  gated on a fresh master-password confirmation (derived to the AuthKey
+  client-side), matching the server's requirement.
+- The Settings dialog gains a **Two-factor authentication** section: shows
+  on/off + recovery codes remaining; enrolling renders the `otpauth://` secret
+  as a scannable **QR** (generated on-device with the `qrcode` crate, inline SVG
+  — no external fetch, CSP-safe) plus the manual key; confirming with a live
+  code activates it and displays the one-time recovery codes; when on, offers
+  regenerate-codes and turn-off.
+
+Guarded by `mfa::tests` (QR render) and an end-to-end
+`api_client_mfa_enrollment_lifecycle` (enroll → activate → status → disable
+against a real server). No server changes — the endpoints already existed and
+were tested.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

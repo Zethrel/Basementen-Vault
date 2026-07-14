@@ -640,3 +640,40 @@ async fn withholding_committed_data_is_detected() {
         "got {err:?}"
     );
 }
+
+#[tokio::test]
+async fn api_client_mfa_enrollment_lifecycle() {
+    let (base_url, state) = spawn_server().await;
+    let (mut api, secrets) = account_ready(&base_url, &state, "mfa@example.com").await;
+    let credential = secrets.auth_key.to_server_credential();
+
+    // Off to begin with.
+    assert!(
+        !api.mfa_status().await.unwrap().0,
+        "two-factor off initially"
+    );
+
+    // Enroll: get a secret + otpauth URI that renders to a scannable QR.
+    let (secret, uri) = api.totp_enroll(credential).await.unwrap();
+    assert!(uri.starts_with("otpauth://totp/"), "{uri}");
+    assert!(desktop_core::totp_qr_svg(&uri).unwrap().contains("<svg"));
+
+    // Not active until confirmed.
+    assert!(
+        !api.mfa_status().await.unwrap().0,
+        "inactive before activate"
+    );
+
+    // Activate with a live code → ten one-time recovery codes, status flips on.
+    let code = vault_server::totp::code_at(&secret, vault_server::security::now()).unwrap();
+    let codes = api.totp_activate(&code).await.unwrap();
+    assert_eq!(codes.len(), 10);
+    let (active, remaining) = api.mfa_status().await.unwrap();
+    assert!(active, "active after activate");
+    assert_eq!(remaining, 10);
+
+    // Turn it back off (fresh password credential + a current code).
+    let code = vault_server::totp::code_at(&secret, vault_server::security::now()).unwrap();
+    api.totp_disable(credential, &code).await.unwrap();
+    assert!(!api.mfa_status().await.unwrap().0, "off after disable");
+}

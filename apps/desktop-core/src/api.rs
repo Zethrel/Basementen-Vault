@@ -402,6 +402,84 @@ impl ApiClient {
         }
     }
 
+    // --- MFA enrollment ---------------------------------------------------
+
+    /// Begin TOTP enrollment: returns the shared secret (base32) and the
+    /// `otpauth://` URI to render as a QR code. Requires a fresh password
+    /// confirmation. MFA only becomes active after [`Self::totp_activate`].
+    pub async fn totp_enroll(
+        &mut self,
+        auth_credential: [u8; 32],
+    ) -> Result<(String, String), ApiError> {
+        let payload = json!({ "auth_credential": b64(auth_credential) });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.post(format!("{base}/api/v1/mfa/totp/enroll"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        Ok((
+            body["secret_base32"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            body["otpauth_uri"].as_str().unwrap_or_default().to_string(),
+        ))
+    }
+
+    /// Confirm enrollment with a live code; on success TOTP becomes required
+    /// for login and the account's one-time recovery codes are returned.
+    pub async fn totp_activate(&mut self, code: &str) -> Result<Vec<String>, ApiError> {
+        let payload = json!({ "code": code });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.post(format!("{base}/api/v1/mfa/totp/activate"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        Ok(body["recovery_codes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Turn TOTP off. Requires a fresh password confirmation and a valid
+    /// current code.
+    pub async fn totp_disable(
+        &mut self,
+        auth_credential: [u8; 32],
+        totp_code: &str,
+    ) -> Result<(), ApiError> {
+        let payload = json!({
+            "auth_credential": b64(auth_credential),
+            "totp_code": totp_code,
+        });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.post(format!("{base}/api/v1/mfa/totp/disable"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
+    }
+
     // --- MFA maintenance --------------------------------------------------
 
     /// Whether TOTP is active and how many single-use recovery codes remain,

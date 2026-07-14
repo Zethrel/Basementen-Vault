@@ -604,6 +604,111 @@ async fn remove_backup_email(
 }
 
 // ---------------------------------------------------------------------------
+// Two-factor (TOTP)
+
+/// Derive the server auth credential from the master password for a
+/// fresh-confirmation-gated action (enroll/disable/regenerate).
+fn credential_for(unlocked: &Unlocked, password: &str) -> Result<[u8; 32], String> {
+    let meta = unlocked.vault.account_meta().ok_or("no account metadata")?;
+    Ok(
+        vault_core::account::login_credential(password, &meta.kdf_salt, &meta.kdf_params)
+            .map_err(err)?
+            .to_server_credential(),
+    )
+}
+
+#[derive(Serialize)]
+struct MfaStatus {
+    totp_active: bool,
+    recovery_codes_remaining: i64,
+}
+
+#[tauri::command]
+async fn mfa_status(ctx: Ctx<'_>) -> Result<MfaStatus, String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let (totp_active, recovery_codes_remaining) = unlocked.api.mfa_status().await.map_err(err)?;
+    Ok(MfaStatus {
+        totp_active,
+        recovery_codes_remaining,
+    })
+}
+
+#[derive(Serialize)]
+struct EnrollResult {
+    secret_base32: String,
+    qr_svg: String,
+}
+
+/// Begin TOTP enrollment: returns the shared secret and a QR to scan. Requires
+/// the master password. Not active until `totp_activate` confirms a live code.
+#[tauri::command]
+async fn totp_enroll(ctx: Ctx<'_>, password: String) -> Result<EnrollResult, String> {
+    let password = Zeroizing::new(password);
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let credential = credential_for(unlocked, &password)?;
+    let (secret_base32, otpauth_uri) = unlocked.api.totp_enroll(credential).await.map_err(err)?;
+    let qr_svg = desktop_core::totp_qr_svg(&otpauth_uri)?;
+    Ok(EnrollResult {
+        secret_base32,
+        qr_svg,
+    })
+}
+
+#[derive(Serialize)]
+struct RecoveryCodes {
+    recovery_codes: Vec<String>,
+}
+
+/// Confirm enrollment with a live code; returns the one-time recovery codes.
+#[tauri::command]
+async fn totp_activate(ctx: Ctx<'_>, code: String) -> Result<RecoveryCodes, String> {
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let recovery_codes = unlocked.api.totp_activate(code.trim()).await.map_err(err)?;
+    Ok(RecoveryCodes { recovery_codes })
+}
+
+/// Turn TOTP off (master password + current code).
+#[tauri::command]
+async fn totp_disable(ctx: Ctx<'_>, password: String, totp_code: String) -> Result<(), String> {
+    let password = Zeroizing::new(password);
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let credential = credential_for(unlocked, &password)?;
+    unlocked
+        .api
+        .totp_disable(credential, totp_code.trim())
+        .await
+        .map_err(err)
+}
+
+/// Replace the recovery codes with a fresh set (master password + current code).
+#[tauri::command]
+async fn regenerate_recovery_codes(
+    ctx: Ctx<'_>,
+    password: String,
+    totp_code: String,
+) -> Result<RecoveryCodes, String> {
+    let password = Zeroizing::new(password);
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+    let credential = credential_for(unlocked, &password)?;
+    let recovery_codes = unlocked
+        .api
+        .regenerate_recovery_codes(credential, totp_code.trim())
+        .await
+        .map_err(err)?;
+    Ok(RecoveryCodes { recovery_codes })
+}
+
+// ---------------------------------------------------------------------------
 // Export / import
 
 fn decrypted_items(unlocked: &Unlocked) -> Vec<Item> {
@@ -822,6 +927,11 @@ pub fn run() {
             recover_complete,
             set_backup_email,
             remove_backup_email,
+            mfa_status,
+            totp_enroll,
+            totp_activate,
+            totp_disable,
+            regenerate_recovery_codes,
             list_sessions,
             revoke_session,
             revoke_other_sessions,

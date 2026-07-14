@@ -386,6 +386,7 @@ $("btn-account").addEventListener("click", () => {
   $("acc-msg").textContent = "";
   accountDialog.showModal();
   renderSessions();
+  renderMfa();
 });
 $("acc-close").addEventListener("click", () => accountDialog.close());
 
@@ -475,6 +476,107 @@ async function backupEmailAction(action) {
 }
 $("acc-set").addEventListener("click", () => backupEmailAction("set"));
 $("acc-remove").addEventListener("click", () => backupEmailAction("remove"));
+
+// --- two-factor authentication ---
+
+const mfaPanels = ["mfa-off", "mfa-enroll-panel", "mfa-on", "mfa-codes-panel"];
+function showMfaPanels(...ids) {
+  for (const id of mfaPanels) $(id).hidden = !ids.includes(id);
+}
+function showCodes(codes) {
+  $("mfa-codes").textContent = codes.join("\n");
+  $("mfa-codes-panel").hidden = false;
+}
+
+async function renderMfa() {
+  $("mfa-msg").textContent = "";
+  let status;
+  try {
+    status = await invoke("mfa_status");
+  } catch (e) {
+    $("mfa-status").textContent = "Could not load two-factor status.";
+    showMfaPanels();
+    return;
+  }
+  if (status.totp_active) {
+    const n = status.recovery_codes_remaining;
+    $("mfa-status").textContent =
+      `On — ${n} recovery code${n === 1 ? "" : "s"} left` +
+      (n <= 2 ? " (running low — regenerate soon)." : ".");
+    showMfaPanels("mfa-on");
+  } else {
+    $("mfa-status").textContent = "Off. Protect your vault with an authenticator app.";
+    showMfaPanels("mfa-off");
+  }
+}
+
+$("mfa-enroll").addEventListener("click", async () => {
+  $("mfa-msg").textContent = "";
+  try {
+    const res = await invoke("totp_enroll", { password: $("mfa-pass").value });
+    $("mfa-qr").innerHTML = res.qr_svg; // our own generated SVG, no scripts
+    $("mfa-secret").textContent = res.secret_base32;
+    $("mfa-pass").value = "";
+    $("mfa-code").value = "";
+    showMfaPanels("mfa-enroll-panel");
+  } catch (e) {
+    $("mfa-msg").textContent = String(e);
+  }
+});
+
+$("mfa-activate").addEventListener("click", async () => {
+  $("mfa-msg").textContent = "";
+  try {
+    const res = await invoke("totp_activate", { code: $("mfa-code").value.trim() });
+    await renderMfa();
+    showCodes(res.recovery_codes);
+  } catch (e) {
+    $("mfa-msg").textContent = String(e);
+  }
+});
+
+$("mfa-cancel").addEventListener("click", () => {
+  $("mfa-qr").textContent = "";
+  $("mfa-secret").textContent = "";
+  renderMfa();
+});
+
+$("mfa-disable").addEventListener("click", async () => {
+  $("mfa-msg").textContent = "";
+  if (!confirm("Turn off two-factor authentication? Your vault will be protected by your master password alone.")) return;
+  try {
+    await invoke("totp_disable", {
+      password: $("mfa-pass2").value,
+      totpCode: $("mfa-code2").value.trim(),
+    });
+    $("mfa-pass2").value = "";
+    $("mfa-code2").value = "";
+    await renderMfa();
+  } catch (e) {
+    $("mfa-msg").textContent = String(e);
+  }
+});
+
+$("mfa-regen").addEventListener("click", async () => {
+  $("mfa-msg").textContent = "";
+  try {
+    const res = await invoke("regenerate_recovery_codes", {
+      password: $("mfa-pass2").value,
+      totpCode: $("mfa-code2").value.trim(),
+    });
+    $("mfa-pass2").value = "";
+    $("mfa-code2").value = "";
+    await renderMfa();
+    showCodes(res.recovery_codes);
+  } catch (e) {
+    $("mfa-msg").textContent = String(e);
+  }
+});
+
+$("mfa-codes-copy").addEventListener("click", async () => {
+  await invoke("copy_secret", { text: $("mfa-codes").textContent });
+  $("mfa-codes-copy").textContent = "Copied (clears in 30 s)";
+});
 
 $("btn-export").addEventListener("click", async () => {
   $("xfer-msg").textContent = "";

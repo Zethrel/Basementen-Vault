@@ -71,6 +71,15 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   white-space: pre-wrap; word-break: break-all; user-select: all;
 }
 
+.mfa-qr { display: flex; justify-content: center; margin: 0.6rem 0; }
+/* The QR is rendered on a white field so authenticators scan it in dark mode. */
+.mfa-qr svg {
+  width: 200px; height: 200px; background: #fff;
+  padding: 8px; border-radius: 8px;
+}
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all; user-select: all; }
+
 .topbar {
   display: flex; align-items: center; gap: 0.7rem;
   padding: 0.6rem 1rem; border-bottom: 1px solid var(--border);

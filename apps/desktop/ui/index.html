@@ -194,6 +194,50 @@
       <button id="acc-remove" class="danger">Remove</button>
     </div>
     <hr class="sep" />
+    <h2>Two-factor authentication</h2>
+    <p id="mfa-status" class="muted small">Checking…</p>
+
+    <div id="mfa-off" hidden>
+      <label>Master password
+        <input id="mfa-pass" type="password" autocomplete="off" /></label>
+      <div class="row"><button id="mfa-enroll" class="primary">Enable two-factor…</button></div>
+    </div>
+
+    <div id="mfa-enroll-panel" hidden>
+      <p class="muted small">Scan this in your authenticator app (Google
+        Authenticator, Aegis, 1Password…), then enter the 6-digit code to
+        confirm.</p>
+      <div id="mfa-qr" class="mfa-qr"></div>
+      <p class="muted small">Can't scan? Enter this key manually:<br />
+        <code id="mfa-secret" class="mono"></code></p>
+      <label>6-digit code
+        <input id="mfa-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" /></label>
+      <div class="row">
+        <button id="mfa-activate" class="primary">Confirm &amp; turn on</button>
+        <button id="mfa-cancel">Cancel</button>
+      </div>
+    </div>
+
+    <div id="mfa-on" hidden>
+      <label>Master password
+        <input id="mfa-pass2" type="password" autocomplete="off" /></label>
+      <label>Current 6-digit code
+        <input id="mfa-code2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" /></label>
+      <div class="row">
+        <button id="mfa-regen">Regenerate recovery codes</button>
+        <button id="mfa-disable" class="danger">Turn off two-factor</button>
+      </div>
+    </div>
+
+    <div id="mfa-codes-panel" hidden>
+      <p class="muted small"><strong>Save these recovery codes.</strong> Each
+        works once if you lose your authenticator. They are shown only now.</p>
+      <pre id="mfa-codes" class="recovery-code"></pre>
+      <div class="row"><button id="mfa-codes-copy">Copy codes</button></div>
+    </div>
+
+    <p id="mfa-msg" class="error" role="alert"></p>
+    <hr class="sep" />
     <h2>Active devices</h2>
     <p class="muted small">Everywhere your account is currently logged in.
       Revoke anything you don't recognise.</p>
