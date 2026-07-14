@@ -25,6 +25,7 @@ tracked in the threat model.
 | [RUNBOOK.md](docs/RUNBOOK.md) | Backups, upgrades, KDF migration, incident response |
 | [MOBILE.md](docs/MOBILE.md) | Android / iOS build steps |
 | [REVIEW_RESPONSE.md](docs/REVIEW_RESPONSE.md) | Response to the security architecture review |
+| [SECURITY.md](SECURITY.md) | How to report a vulnerability, scope, and safe harbor |
 
 ## Security pillars (summary)
 
@@ -38,3 +39,20 @@ tracked in the threat model.
   e-mail with a cooling-off period.
 - **Failed logins** cost a randomized 250–300 ms delay plus progressive
   rate limiting.
+
+## Reporting security issues
+
+Please **do not** file public issues for vulnerabilities. See
+[SECURITY.md](SECURITY.md) for private reporting via GitHub, scope, and our
+safe-harbor policy. (Reminder: this project has not yet had an independent
+security audit — treat it as beta.)
+
+## License
+
+Copyright (C) 2026 The Basementen Vault authors.
+
+Basementen Vault is free software licensed under the **GNU Affero General Public
+License v3.0 only** (`AGPL-3.0-only`); see [LICENSE](LICENSE) for the full text.
+The AGPL's network-use clause (§13) means that if you run a modified server for
+others over a network, you must offer them the corresponding source. This is
+deliberate: it keeps self-hosted forks open for the people who depend on them.
