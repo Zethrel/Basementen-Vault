@@ -402,6 +402,58 @@ impl ApiClient {
         }
     }
 
+    // --- MFA maintenance --------------------------------------------------
+
+    /// Whether TOTP is active and how many single-use recovery codes remain,
+    /// so the app can warn the user before they run out.
+    pub async fn mfa_status(&mut self) -> Result<(bool, i64), ApiError> {
+        let (status, body) = self
+            .authed(|http, base, token| {
+                http.get(format!("{base}/api/v1/mfa/status"))
+                    .bearer_auth(token)
+            })
+            .await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        Ok((
+            body["totp_active"].as_bool().unwrap_or(false),
+            body["recovery_codes_remaining"].as_i64().unwrap_or(0),
+        ))
+    }
+
+    /// Replace the account's single-use recovery codes with a fresh set,
+    /// returned so the caller can show them exactly once. Requires a fresh
+    /// password confirmation and a current TOTP code.
+    pub async fn regenerate_recovery_codes(
+        &mut self,
+        auth_credential: [u8; 32],
+        totp_code: &str,
+    ) -> Result<Vec<String>, ApiError> {
+        let payload = json!({
+            "auth_credential": b64(auth_credential),
+            "totp_code": totp_code,
+        });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.post(format!("{base}/api/v1/mfa/recovery-codes/regenerate"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        Ok(body["recovery_codes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     // --- rollback checkpoint ---------------------------------------------
 
     /// Fetch the account's stored rollback checkpoint `(seq, tag)`, if any.

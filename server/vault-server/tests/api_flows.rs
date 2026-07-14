@@ -894,3 +894,176 @@ async fn refresh_updates_last_used_at() {
         "refresh advances last_used_at past created_at"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Recovery / device-enrollment hardening
+
+/// Enroll + activate TOTP for the already-verified account, returning the
+/// shared secret and the one-time recovery codes.
+async fn activate_totp(
+    server: &TestServer,
+    reg: &vault_core::account::Registration,
+    access: &str,
+) -> (String, Vec<String>) {
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/mfa/totp/enroll",
+            Some(access),
+            Some(json!({ "auth_credential": credential_b64(reg) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let secret = body["secret_base32"].as_str().unwrap().to_string();
+
+    let code = totp::code_at(&secret, security::now()).unwrap();
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/mfa/totp/activate",
+            Some(access),
+            Some(json!({ "code": code })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let codes = body["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    (secret, codes)
+}
+
+#[tokio::test]
+async fn totp_code_cannot_be_replayed() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (_, body) = login(&server, &reg, json!({})).await;
+    let access = body["access_token"].as_str().unwrap().to_string();
+    let (secret, _codes) = activate_totp(&server, &reg, &access).await;
+
+    // One-time-use tracking starts at first login, so the current code is fine.
+    let code = totp::code_at(&secret, security::now()).unwrap();
+
+    // A single live code logs in once…
+    let (status, _) = login(&server, &reg, json!({ "totp_code": code })).await;
+    assert_eq!(status, StatusCode::OK, "first use of the code succeeds");
+
+    // …and is refused on replay, even though it is still within its window.
+    let (status, _) = login(&server, &reg, json!({ "totp_code": code })).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "the same TOTP code must not be accepted twice"
+    );
+}
+
+#[tokio::test]
+async fn new_device_login_notifies_owner_once_per_device() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+
+    let sign_in_mails = |server: &TestServer| {
+        server
+            .state
+            .mailer
+            .sent()
+            .iter()
+            .filter(|m| m.to == EMAIL && m.subject.contains("new sign-in"))
+            .count()
+    };
+
+    login_device(&server, &reg, "laptop").await;
+    assert_eq!(sign_in_mails(&server), 1, "first device alerts the owner");
+
+    // A second login from the same still-active device does not re-alarm.
+    login_device(&server, &reg, "laptop").await;
+    assert_eq!(
+        sign_in_mails(&server),
+        1,
+        "same active device: no new alert"
+    );
+
+    // A different device does.
+    login_device(&server, &reg, "phone").await;
+    assert_eq!(sign_in_mails(&server), 2, "a new device alerts the owner");
+}
+
+#[tokio::test]
+async fn oversized_device_name_is_bounded_and_sanitized() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+
+    let nasty = format!("ab\u{0007}\tcd{}", "x".repeat(500));
+    let (access, _) = login_device(&server, &reg, &nasty).await;
+
+    let (status, body) = server
+        .request("GET", "/api/v1/sessions", Some(&access), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let stored = body["sessions"][0]["device_name"].as_str().unwrap();
+    assert!(stored.chars().count() <= 64, "device name is length-capped");
+    assert!(
+        !stored.chars().any(|c| c.is_control()),
+        "control characters are stripped"
+    );
+}
+
+#[tokio::test]
+async fn recovery_codes_status_and_regeneration() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+    let (_, body) = login(&server, &reg, json!({})).await;
+    let access = body["access_token"].as_str().unwrap().to_string();
+    let (secret, codes) = activate_totp(&server, &reg, &access).await;
+
+    // Status reflects an active TOTP and a full complement of codes.
+    let (status, body) = server
+        .request("GET", "/api/v1/mfa/status", Some(&access), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["totp_active"], true);
+    assert_eq!(body["recovery_codes_remaining"], 10);
+
+    // Spending one code drops the remaining count.
+    let (status, _) = login(&server, &reg, json!({ "recovery_code": codes[0] })).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = server
+        .request("GET", "/api/v1/mfa/status", Some(&access), None)
+        .await;
+    assert_eq!(body["recovery_codes_remaining"], 9);
+
+    // Regeneration needs a fresh credential + a current (unused) TOTP code.
+    let code = totp::code_at(&secret, security::now()).unwrap();
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/mfa/recovery-codes/regenerate",
+            Some(&access),
+            Some(json!({ "auth_credential": credential_b64(&reg), "totp_code": code })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let fresh: Vec<String> = body["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(fresh.len(), 10);
+
+    // Count is restored, an old code no longer works, and a new one does.
+    let (_, body) = server
+        .request("GET", "/api/v1/mfa/status", Some(&access), None)
+        .await;
+    assert_eq!(body["recovery_codes_remaining"], 10);
+    let (status, _) = login(&server, &reg, json!({ "recovery_code": codes[1] })).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "old codes are invalidated"
+    );
+    let (status, _) = login(&server, &reg, json!({ "recovery_code": fresh[0] })).await;
+    assert_eq!(status, StatusCode::OK, "fresh codes work");
+}

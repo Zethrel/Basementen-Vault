@@ -68,20 +68,31 @@ pub fn code_at(secret_base32: &str, unix_secs: i64) -> Option<String> {
 }
 
 /// Verify a submitted code against the secret at the given time, allowing
-/// ±1 step of clock drift. Comparison is constant-time.
-pub fn verify(secret_base32: &str, submitted: &str, unix_secs: i64) -> bool {
+/// ±1 step of clock drift, and return the matched 30-second time-step
+/// (`unix / STEP_SECS`) so callers can enforce one-time use. Returns `None`
+/// if no accepted window matched. Comparison is constant-time.
+pub fn verify_step(secret_base32: &str, submitted: &str, unix_secs: i64) -> Option<i64> {
     let submitted = submitted.trim();
     if submitted.len() != DIGITS as usize || !submitted.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
+        return None;
     }
-    let mut ok = false;
+    let mut matched: Option<i64> = None;
     for drift in -DRIFT_STEPS..=DRIFT_STEPS {
         let t = unix_secs + drift * STEP_SECS;
+        // Check every window (no early return) so timing doesn't reveal which
+        // one matched. The step number itself is derivable from the clock, so
+        // recording the matched window leaks nothing secret.
         if let Some(expected) = code_at(secret_base32, t) {
-            // Accumulate with |= instead of early return: check all windows
-            // every time so timing doesn't reveal which window matched.
-            ok |= bool::from(expected.as_bytes().ct_eq(submitted.as_bytes()));
+            if bool::from(expected.as_bytes().ct_eq(submitted.as_bytes())) {
+                matched = Some(t / STEP_SECS);
+            }
         }
     }
-    ok
+    matched
+}
+
+/// Verify a submitted code, allowing ±1 step of clock drift. Constant-time.
+/// Use [`verify_step`] where one-time-use enforcement is needed.
+pub fn verify(secret_base32: &str, submitted: &str, unix_secs: i64) -> bool {
+    verify_step(secret_base32, submitted, unix_secs).is_some()
 }

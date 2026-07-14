@@ -77,6 +77,11 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::mfa::totp_activate),
         )
         .route("/api/v1/mfa/totp/disable", post(routes::mfa::totp_disable))
+        .route("/api/v1/mfa/status", get(routes::mfa::status))
+        .route(
+            "/api/v1/mfa/recovery-codes/regenerate",
+            post(routes::mfa::regenerate_recovery_codes),
+        )
         .route("/api/v1/vault/keys", get(routes::vault::get_keys))
         .route("/api/v1/vault/items", get(routes::items::list_items))
         .route(
