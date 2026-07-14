@@ -81,6 +81,20 @@ consider raising `BV_RECOVERY_COOLOFF_HOURS`.
 - Disk: SQLite WAL grows under write bursts; `PRAGMA wal_checkpoint` runs
   automatically, just alert on disk >80 %.
 
+## Host hardening for client devices
+
+The app zeroizes keys in memory on lock, but userspace cannot fully prevent
+key-bearing memory from reaching disk. Recommend to users:
+
+- **Enable full-disk or encrypted swap.** Under memory pressure the OS may
+  page process memory (including keys) to swap; encrypted swap neutralizes
+  that. macOS encrypts swap by default; Linux users should use an encrypted
+  swap partition or `zram`; Windows users should enable BitLocker.
+- **Rely on OS full-disk encryption** (FileVault / LUKS / BitLocker) so the
+  local ciphertext replica and any crash dumps are protected at rest.
+
+See `THREAT_MODEL.md` §A6 for the exact memory-protection posture and limits.
+
 ## Before real-world use
 
 - [ ] External security review / penetration test (non-negotiable for a

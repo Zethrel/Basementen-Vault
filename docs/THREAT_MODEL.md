@@ -74,9 +74,30 @@ under the vault key. Unlocking requires the master password (Argon2id at
 desktop parameters). Auto-lock (15 min idle) zeroizes keys in memory;
 clipboard auto-clears 30 s after copying a secret.
 
-**Residual risk:** malware on an *unlocked* device reads memory — out of
-scope for any password manager. Memory is zeroized on lock to narrow the
-window.
+**Memory-protection posture (as built, with honest limits).** What we do:
+key types are `Zeroize`/`ZeroizeOnDrop`, transient plaintext uses
+`Zeroizing`, dropping the session on lock/auto-lock scrubs the keys,
+`unsafe_code = "forbid"` rules out whole classes of memory bugs, and the
+clipboard clear only fires if the clipboard still holds the copied secret
+(never clobbers newer content). What we do **not** yet do, and the resulting
+exposure:
+
+| Vector | Status | Note |
+|---|---|---|
+| Compiler reordering defeating zeroization | Mitigated | `zeroize` uses volatile writes + compiler fences by design |
+| Locking key pages out of swap (`mlock`) | **Not done** | Keys can be paged to disk under memory pressure. Mitigation: encrypted swap at the OS level (operator responsibility; note in RUNBOOK). |
+| Suppressing core dumps / crash dumps | **Not done** | A crash could write key-bearing memory to a dump file. |
+| Panic-path scrubbing | Partial | `ZeroizeOnDrop` runs during unwinding; a hard abort does not unwind. |
+| Clipboard history managers / OS sync | Out of app control | The app clears its own write; third-party clipboard managers may retain it. Documented for users. |
+
+These are the standard limits of a userspace password manager and match the
+posture of mainstream products; they are listed here so an auditor sees them
+stated, not hidden. Page-locking and core-dump suppression are tracked
+below.
+
+**Residual risk:** malware on an *unlocked* device reads process memory —
+out of scope for any password manager. Zeroization on lock narrows the
+window; it does not close it against a live attacker on the device.
 
 ### A7 — Supply chain
 
@@ -84,12 +105,25 @@ Crypto is confined to audited RustCrypto crates; `unsafe_code = "forbid"`
 workspace-wide; RustSec `cargo audit` in CI; `Cargo.lock` committed; no
 frontend package dependencies at all (plain JS, CSP `default-src 'self'`).
 
+## Metadata disclosure
+
+Zero-knowledge protects contents, not all metadata. Exactly what a
+compromised server can observe (item count, ciphertext sizes, timing, device
+names, …) — and what it cannot — is enumerated in **`docs/METADATA.md`**.
+The largest remaining channel is item-ciphertext length; padding to fixed
+buckets is the tracked mitigation below.
+
 ## Known gaps / accepted risks (v1)
 
-| Gap | Status |
-|---|---|
-| Whole-vault rollback by malicious server | Accepted; signed checkpoints post-v1 |
-| No WebAuthn second factor | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1 |
-| No compromised-password (HIBP) check at registration | Backlog |
-| E-mail inbox compromise enables wipe-after-72h | Accepted, by design (§A5) |
-| External security audit | **Required before real-world use** — see RUNBOOK |
+Ordered roughly by priority for post-v1 work.
+
+| Gap | Priority | Status |
+|---|---|---|
+| **Whole-vault rollback by malicious server** | **High** | Accepted for v1. Signed/authenticated monotonic checkpoints (server presents a client-signed `(max_seq, timestamp)` the client verifies is not older than its last-seen) is the intended fix — promoted to the top of the post-v1 list on reviewer recommendation. |
+| **Item-size metadata leak** | High | Ciphertext length ≈ plaintext length. Fix: pad item plaintext to fixed buckets as a versioned `EncryptedItem` v2 (`docs/METADATA.md` rec. 1). |
+| No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
+| No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
+| Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |
+| Mobile Argon2 parameters possibly conservative | Low | Floor is `m=19 MiB, t=2, p=1`; desktop `m=64 MiB, t=3, p=4`. Benchmark real unlock times per device class and raise toward `m=64–128 MiB` where UX allows — reviewer note. Parameters are per-account and versioned, so raising them later is a normal password-change (`RUNBOOK.md` §KDF migration). |
+| E-mail inbox compromise enables wipe-after-72h | Accepted | By design (§A5): disclosure is worse than denial. |
+| External security audit | **Blocker** | **Required before real-world use** — see RUNBOOK. |

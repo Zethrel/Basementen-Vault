@@ -65,9 +65,20 @@ master password + email (salt input)
   `iterations = 3`, `parallelism = 4` on desktop; mobile may negotiate down to
   the OWASP floor (`m = 19 MiB, t = 2, p = 1`) but never below it. Parameters
   are stored per-account and versioned so they can be raised over time.
-- **Salt** for the client KDF is derived from the normalized e-mail
-  (`HKDF(email)`) so the client can derive keys before talking to the server;
-  a per-account random salt is additionally mixed in after first contact.
+- **Salt** for the client KDF is the normalized e-mail domain-separated
+  through `HKDF-SHA256` (as built: `kdf::email_salt`). This is a deliberate,
+  single-scheme choice — **not** a hybrid with a later random salt (an earlier
+  draft of this doc floated "mix in a random server salt after first contact";
+  that was never built and is intentionally dropped — see
+  `docs/CRYPTOGRAPHIC_INVARIANTS.md` §Salt for the rationale). Because Argon2id
+  is memory-hard, a per-target precomputation against a known e-mail gains an
+  attacker essentially nothing over guessing at crack time, so a random salt
+  would add round-trip/bootstrapping complexity for no meaningful gain. E-mail
+  addresses are unique, so identical passwords on different accounts still
+  derive unrelated keys, and there is no cross-account amortization. This
+  matches Bitwarden's design. (Defense in depth against a *predictable* salt is
+  still available cheaply if ever wanted: `prelogin` already precedes every
+  derivation and could return an extra random salt — noted, not adopted.)
 - **Server-side hashing.** The server never stores the Auth Key directly — it
   runs it through Argon2id again with a random per-user salt. A leaked
   database therefore requires attacking two stacked Argon2id computations.
@@ -94,14 +105,17 @@ master password + email (salt input)
 
 ### 3.1 Registration
 
-1. User enters e-mail + master password (client enforces: ≥ 12 chars, checked
-   against a compromised-password list — local `zxcvbn` scoring + k-anonymity
-   query to Have I Been Pwned; never send the password itself).
+1. User enters e-mail + master password. **As built:** the client enforces a
+   ≥ 12-character minimum. **Backlog (not yet implemented):** local `zxcvbn`
+   strength scoring and a Have I Been Pwned k-anonymity check (queried by
+   SHA-1 prefix so the password itself never leaves the device). Tracked in
+   `THREAT_MODEL.md` §Known gaps.
 2. Client derives MK → AuthKey + WrappingKey, generates VK, wraps VK.
 3. Client sends: e-mail, AuthKey, wrapped VK, KDF parameters.
 4. Server Argon2id-hashes the AuthKey, stores the record, and sends a
-   **verification e-mail** (signed, single-use, 15-minute expiry token).
-   Accounts are unusable until the e-mail is verified.
+   **verification e-mail**. The token is a 256-bit random value; the server
+   stores only its SHA-256, single-use, 15-minute expiry (as built). Accounts
+   are unusable until the e-mail is verified.
 5. Client generates and shows a **Recovery Kit** (see §5) exactly once.
 
 ### 3.2 Login
