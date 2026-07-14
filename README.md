@@ -42,6 +42,13 @@ development history.
 - **Failed logins** cost a randomized 250–300 ms delay plus progressive
   rate limiting.
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev
+setup, the checks CI enforces, and the non-negotiables (zero-knowledge,
+`forbid(unsafe)`, and the cryptographic invariants). For anything non-trivial,
+open an issue to discuss first.
+
 ## Reporting security issues
 
 Please **do not** file public issues for vulnerabilities. See
