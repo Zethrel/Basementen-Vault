@@ -14,6 +14,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
+    // Suppress core dumps so a crash can't leak in-memory secrets (session
+    // token hashes, the enumeration secret, TLS material) to a dump file.
+    if !vault_core::harden::suppress_core_dumps() {
+        tracing::warn!("core dumps not fully suppressed on this platform");
+    }
+
     let cfg = Config::from_env().map_err(|e| format!("configuration error: {e}"))?;
     let pool = db::connect(&cfg.db_path).await?;
     let mailer = Mailer::from_config(&cfg.mail).map_err(|e| format!("mailer error: {e}"))?;

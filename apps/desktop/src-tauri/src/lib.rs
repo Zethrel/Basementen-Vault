@@ -757,6 +757,10 @@ async fn copy_secret(app: tauri::AppHandle, text: String) -> Result<(), String> 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Suppress core dumps before any secret exists, so a later crash can't
+    // write key-bearing memory to disk (best-effort; see vault_core::harden).
+    let _ = vault_core::harden::suppress_core_dumps();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())

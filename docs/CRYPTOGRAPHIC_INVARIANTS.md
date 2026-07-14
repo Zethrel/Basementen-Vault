@@ -115,10 +115,12 @@ model is `ZeroizeOnDrop`); every secret's `Debug` prints `<redacted>` (keys,
   Tauri command password args wrapped in `Zeroizing`.
 - **Guarded by:** compile-time (`Debug`/`Drop` impls) + `secmem::tests` +
   `items::tests::debug_never_prints_secret_fields` + `unsafe_code = "forbid"`
-  in every first-party crate (the `mlock` syscall's `unsafe` lives in the
-  `region` dependency). See `THREAT_MODEL.md` §A6 for the full
-  in-memory-plaintext map and the honest limits (the JS-heap residual;
-  core-dump suppression not done yet).
+  in every first-party crate (the `mlock` / `setrlimit` / `prctl` syscalls'
+  `unsafe` lives in the `region` / `rlimit` / `prctl` dependencies). Both
+  binaries also call `harden::suppress_core_dumps()` at startup so a crash
+  can't spill key memory to a dump. See `THREAT_MODEL.md` §A6 for the full
+  in-memory-plaintext map and the honest limits (the JS-heap residual; Windows
+  WER dumps operator-disabled).
 
 ### I9 — No plaintext secret is written to logs
 Server logging never includes passwords, credentials, keys, tokens, or vault

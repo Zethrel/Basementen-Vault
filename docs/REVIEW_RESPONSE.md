@@ -381,6 +381,26 @@ hibernation image. Notes:
   to raise the locked-memory budget and how to disable core dumps (the one
   remaining §A6 item).
 
+## Post-milestone hardening — core-dump suppression (2026-07)
+
+Closed the last §A6 memory item. Both binaries call
+`vault_core::harden::suppress_core_dumps()` at startup (before any secret
+exists), so a later crash can't spill key-bearing memory to a core/crash dump:
+
+- **Linux:** `RLIMIT_CORE = 0` **and** `PR_SET_DUMPABLE = 0`. The rlimit alone
+  is insufficient — the kernel ignores it when `core_pattern` pipes to a
+  handler (systemd-coredump/apport), the common desktop case — so
+  `PR_SET_DUMPABLE = 0` is what actually suppresses the dump (and blocks
+  same-user `ptrace` as a bonus).
+- **Other unix (macOS/BSD):** `RLIMIT_CORE = 0`.
+- **Windows:** not suppressible from userspace; operators disable WER dumps by
+  policy (RUNBOOK). Keys are `mlock`'d regardless, limiting exposure.
+
+Same `forbid(unsafe)` discipline as `mlock`: the syscalls live in the target-
+gated `rlimit` / `prctl` dependencies (no-op on non-unix), never in our code.
+Guarded by `harden::tests`. This leaves the client memory posture with only the
+two inherent residuals — the JS heap and a live attacker on an unlocked device.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

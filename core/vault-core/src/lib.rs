@@ -35,6 +35,7 @@ pub mod account;
 pub mod envelope;
 pub mod error;
 pub mod export;
+pub mod harden;
 pub mod item;
 pub mod kdf;
 pub mod keys;

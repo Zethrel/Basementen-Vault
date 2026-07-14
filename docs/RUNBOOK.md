@@ -115,10 +115,14 @@ remaining gaps:
   best-effort case and for any non-key plaintext. macOS encrypts swap by
   default; Linux users should use an encrypted swap partition or `zram`;
   Windows users should enable BitLocker.
-- **Disable core dumps for the app** so a crash can't write key-bearing memory
-  to a dump file (core-dump suppression is not yet built in): Linux
-  `ulimit -c 0` / `LimitCORE=0` in a systemd unit; macOS `launchctl limit
-  core 0`.
+- **Core dumps** are already suppressed by the app itself at startup on
+  Linux/macOS (`RLIMIT_CORE=0`, plus `PR_SET_DUMPABLE=0` on Linux). No action
+  needed there. On **Windows**, the app can't fully disable Windows Error
+  Reporting from userspace — disable per-app crash dumps via policy if a crash
+  dump of the vault process would concern you (`HKLM\...\Windows Error
+  Reporting\LocalDumps` exclusion, or Group Policy "Disable Windows Error
+  Reporting"). Belt-and-suspenders on any OS: `ulimit -c 0` / `LimitCORE=0` in
+  the systemd unit for the server.
 - **Rely on OS full-disk encryption** (FileVault / LUKS / BitLocker) so the
   local ciphertext replica and any crash dumps are protected at rest.
 

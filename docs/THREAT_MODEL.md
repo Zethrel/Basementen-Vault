@@ -213,13 +213,14 @@ copied secret (never clobbers newer content). Status of each vector:
 |---|---|---|
 | Compiler reordering defeating zeroization | Mitigated | `zeroize` uses volatile writes + compiler fences by design |
 | Locking key pages out of swap (`mlock`) | **Done (best-effort)** | Every key type is backed by `secmem::SecretBytes`, a page-locked heap allocation (`mlock`/`VirtualLock` via the `region` crate). Keys are pinned in RAM, not written to swap/hibernation. Best-effort: if the OS refuses (e.g. `RLIMIT_MEMLOCK`), the key still works, just unpinned. The syscall's `unsafe` is inside `region`, so `forbid(unsafe)` stands. |
-| Suppressing core dumps / crash dumps | **Not done** | A crash could write key-bearing memory to a dump file. Tracked below; operator mitigation (disable core dumps) in RUNBOOK. |
-| Panic-path scrubbing | Partial | Drop-based scrub runs during unwinding; a hard abort does not unwind. |
+| Suppressing core dumps / crash dumps | **Done (best-effort)** | Both the client and server call `harden::suppress_core_dumps()` at startup: Linux sets `RLIMIT_CORE = 0` **and** `PR_SET_DUMPABLE = 0` (the latter also covers the `core_pattern`-pipe case that the rlimit alone doesn't, e.g. systemd-coredump); other unix sets `RLIMIT_CORE = 0`. **Windows:** not suppressed in-app — Windows Error Reporting may still capture a dump; disable via policy (RUNBOOK). |
+| Panic-path scrubbing | Partial | Drop-based scrub runs during unwinding; a hard abort does not unwind (but produces no core dump either, per the row above). |
 | Clipboard history managers / OS sync | Out of app control | The app clears its own write; third-party clipboard managers may retain it. Documented for users. |
 
 These are the standard limits of a userspace password manager and match the
 posture of mainstream products; they are listed here so an auditor sees them
-stated, not hidden. Core-dump suppression is the remaining item, tracked below.
+stated, not hidden. The remaining userspace-unclosable item is Windows crash
+dumps (operator-disabled) and the live-attacker case below.
 
 **In-memory-plaintext map (audit, 2026-07).** Every place a plaintext secret
 lives in the *Rust* process, how long, and whether it is scrubbed:
@@ -316,7 +317,7 @@ Ordered roughly by priority for post-v1 work.
 | Item-size metadata leak | **Mitigated** | Implemented as `EncryptedItem` v2: plaintext is length-prefixed and zero-padded to 256-byte buckets before encryption, so ciphertext length reveals only a bucket. v1 records migrate on next write. Residual: long notes still leak size to 256-byte granularity (a future larger floor / exponential bucketing could tighten it). §Item record format in CRYPTOGRAPHIC_INVARIANTS. |
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
-| Core dumps / crash dumps not suppressed | Medium | A crash could write key-bearing memory to a dump. Key pages are now `mlock`'d out of swap (§A6, done); core-dump suppression is the remaining item. Operator mitigation (disable core dumps) in RUNBOOK. |
+| Windows crash dumps (WER) not suppressed in-app | Low | On unix, core dumps are suppressed at startup (§A6, done). On Windows, Windows Error Reporting can still capture a crash dump; the app can't fully disable WER from userspace, so operators disable it via policy/registry (RUNBOOK). Keys are still `mlock`'d, limiting what lands in a dump. |
 | Plaintext secrets in the WebView / JS heap | Medium | Inherent to a web-UI password manager: secrets shown/edited live in the JS heap until the view closes, beyond Rust's zeroization. Closing it needs a native-widget or WASM-core UI. Rust-side lifetime is now fully scrubbed (§A6 in-memory map). |
 | `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart. See the exploitability analysis below — it is not practically exploitable; persisting the secret closes even the theoretical signal. Deferred, consistent with the existing per-process `dummy_hash`. |
 | Bearer access tokens are replayable for ≤15 min | Low | Sender-constrained tokens (DPoP proof-of-possession or mTLS) would eliminate the replay window (§A4b). Deferred; short TTL + rotation + revocation is the v1 posture. |
