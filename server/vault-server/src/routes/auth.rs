@@ -152,6 +152,7 @@ pub async fn login(
         "refresh_token": tokens.1,
         "access_expires_in": ACCESS_TOKEN_TTL_SECS,
         "kdf_params": parse_json(&account.kdf_params),
+        "kdf_salt": crate::routes::accounts::encode_salt(&account.kdf_salt),
         "master_wrapped_vault_key": parse_json(&account.master_wrapped_vault_key),
     })))
 }

@@ -45,5 +45,5 @@ pub use envelope::WrappedKey;
 pub use error::CryptoError;
 pub use export::{decrypt_export, encrypt_export, ExportEnvelope};
 pub use item::EncryptedItem;
-pub use kdf::KdfParams;
+pub use kdf::{generate_salt, KdfParams};
 pub use keys::{AuthKey, MasterKey, RecoveryKey, VaultKey, WrappingKey};

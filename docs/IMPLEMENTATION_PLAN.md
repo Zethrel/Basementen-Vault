@@ -45,7 +45,7 @@ These are non-negotiable design rules; every feature below must comply.
 ### 2.1 Key hierarchy
 
 ```
-master password + email (salt input)
+master password + random per-account salt (from prelogin)
         │
         ▼  Argon2id (client-side)
    Master Key (MK, 256-bit)
@@ -65,20 +65,21 @@ master password + email (salt input)
   `iterations = 3`, `parallelism = 4` on desktop; mobile may negotiate down to
   the OWASP floor (`m = 19 MiB, t = 2, p = 1`) but never below it. Parameters
   are stored per-account and versioned so they can be raised over time.
-- **Salt** for the client KDF is the normalized e-mail domain-separated
-  through `HKDF-SHA256` (as built: `kdf::email_salt`). This is a deliberate,
-  single-scheme choice — **not** a hybrid with a later random salt (an earlier
-  draft of this doc floated "mix in a random server salt after first contact";
-  that was never built and is intentionally dropped — see
-  `docs/CRYPTOGRAPHIC_INVARIANTS.md` §Salt for the rationale). Because Argon2id
-  is memory-hard, a per-target precomputation against a known e-mail gains an
-  attacker essentially nothing over guessing at crack time, so a random salt
-  would add round-trip/bootstrapping complexity for no meaningful gain. E-mail
-  addresses are unique, so identical passwords on different accounts still
-  derive unrelated keys, and there is no cross-account amortization. This
-  matches Bitwarden's design. (Defense in depth against a *predictable* salt is
-  still available cheaply if ever wanted: `prelogin` already precedes every
-  derivation and could return an extra random salt — noted, not adopted.)
+- **Salt** for the client KDF is a **random 128-bit per-account value**
+  (`kdf::generate_salt`), created once at registration, stored server-side
+  (not secret), and returned by `prelogin` so any client can derive. The
+  account e-mail is an *identifier only* and does **not** enter key
+  derivation. (A v1 draft derived the salt from the e-mail, Bitwarden-style;
+  a security review prompted the switch to a random salt — see
+  `docs/REVIEW_RESPONSE.md` §Second review. The e-mail-derived scheme was
+  cryptographically sound but paid two avoidable robustness costs for no real
+  benefit in our architecture: cross-client e-mail-normalization had to be
+  byte-identical on every platform or a user could be locked out, and the
+  account e-mail could not change without rewrapping. A random salt removes
+  both, and our flows already fetch `prelogin` before deriving, so nothing is
+  lost.) Anti-enumeration: `prelogin` for an *unknown* e-mail returns a
+  stable, unpredictable dummy salt (HMAC of the e-mail under a server secret),
+  indistinguishable from a real account's stored salt.
 - **Server-side hashing.** The server never stores the Auth Key directly — it
   runs it through Argon2id again with a random per-user salt. A leaked
   database therefore requires attacking two stacked Argon2id computations.

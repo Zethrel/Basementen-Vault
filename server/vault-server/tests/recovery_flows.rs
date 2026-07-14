@@ -102,8 +102,8 @@ async fn setup() -> (Server, vault_core::account::Registration) {
         state,
     };
 
-    let reg = vault_core::account::register(PASSWORD, EMAIL, vault_core::KdfParams::mobile_floor())
-        .unwrap();
+    let reg =
+        vault_core::account::register(PASSWORD, vault_core::KdfParams::mobile_floor()).unwrap();
     let (status, _) = server
         .request(
             "POST",
@@ -113,6 +113,7 @@ async fn setup() -> (Server, vault_core::account::Registration) {
                 "email": EMAIL,
                 "auth_credential": b64(reg.bundle.auth_credential),
                 "recovery_verifier": b64(reg.bundle.recovery_verifier),
+                "kdf_salt": b64(reg.bundle.kdf_salt),
                 "kdf_params": reg.bundle.kdf_params,
                 "master_wrapped_vault_key": serde_json::to_value(&reg.bundle.master_wrapped_vault_key).unwrap(),
                 "recovery_wrapped_vault_key": serde_json::to_value(&reg.bundle.recovery_wrapped_vault_key).unwrap(),
@@ -171,6 +172,7 @@ fn complete_body(
         "wipe": wipe,
         "auth_credential": b64(new_reg.bundle.auth_credential),
         "kdf_params": new_reg.bundle.kdf_params,
+        "kdf_salt": b64(new_reg.bundle.kdf_salt),
         "master_wrapped_vault_key": serde_json::to_value(&new_reg.bundle.master_wrapped_vault_key).unwrap(),
         "recovery_wrapped_vault_key": serde_json::to_value(&new_reg.bundle.recovery_wrapped_vault_key).unwrap(),
         "new_recovery_verifier": b64(new_reg.bundle.recovery_verifier),
@@ -230,7 +232,6 @@ async fn full_recovery_with_kit_preserves_vault() {
         &reg.recovery_code,
         &wrapped,
         NEW_PASSWORD,
-        EMAIL,
         vault_core::KdfParams::mobile_floor(),
     )
     .unwrap();
@@ -352,8 +353,7 @@ async fn without_kit_requires_explicit_wipe_and_destroys_items() {
 
     // Attacker-style completion: fresh bundle, no verifier, no wipe consent.
     let intruder =
-        vault_core::account::register(NEW_PASSWORD, EMAIL, vault_core::KdfParams::mobile_floor())
-            .unwrap();
+        vault_core::account::register(NEW_PASSWORD, vault_core::KdfParams::mobile_floor()).unwrap();
     let (status, body) = server
         .request(
             "POST",

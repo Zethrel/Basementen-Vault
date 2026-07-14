@@ -1,45 +1,70 @@
 //! End-to-end tests over the public API: register → unlock → item crypto →
 //! recovery → password change. All tests use the OWASP-floor KDF parameters
 //! to keep the suite fast; parameter validation itself is tested explicitly.
+//!
+//! Since the KDF-salt migration the account e-mail no longer participates in
+//! key derivation; every derivation uses the account's random `kdf_salt`.
 
-use vault_core::account::{self};
+use vault_core::account::{self, Registration};
 use vault_core::error::CryptoError;
-use vault_core::kdf::{derive_master_key, normalize_email, KdfParams};
+use vault_core::kdf::{derive_master_key, generate_salt, normalize_email, KdfParams};
 use vault_core::keys::{RecoveryKey, VaultKey};
 
-const EMAIL: &str = "user@example.com";
 const PASSWORD: &str = "correct horse battery staple";
 
 fn params() -> KdfParams {
     KdfParams::mobile_floor()
 }
 
+/// Unlock the vault a registration produced, using its own salt.
+fn unlock(password: &str, reg: &Registration) -> Result<account::AccountSecrets, CryptoError> {
+    account::unlock(
+        password,
+        &reg.bundle.kdf_salt,
+        &reg.bundle.kdf_params,
+        &reg.bundle.master_wrapped_vault_key,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // KDF
 
 #[test]
-fn kdf_is_deterministic_and_email_bound() {
-    let a = derive_master_key(PASSWORD, EMAIL, &params()).unwrap();
-    let b = derive_master_key(PASSWORD, EMAIL, &params()).unwrap();
+fn kdf_is_deterministic_and_salt_bound() {
+    let salt = generate_salt();
+    let a = derive_master_key(PASSWORD, &salt, &params()).unwrap();
+    let b = derive_master_key(PASSWORD, &salt, &params()).unwrap();
     assert_eq!(a, b, "same inputs must derive the same Master Key");
 
-    let other_email = derive_master_key(PASSWORD, "other@example.com", &params()).unwrap();
-    assert_ne!(a, other_email, "different e-mail must change the salt");
+    let other_salt = generate_salt();
+    let c = derive_master_key(PASSWORD, &other_salt, &params()).unwrap();
+    assert_ne!(a, c, "a different salt must change the key");
 
-    let other_pw = derive_master_key("wrong password", EMAIL, &params()).unwrap();
+    let other_pw = derive_master_key("wrong password", &salt, &params()).unwrap();
     assert_ne!(a, other_pw);
 }
 
 #[test]
-fn kdf_email_normalization_is_stable() {
+fn salt_is_random_per_registration() {
+    let a = account::register(PASSWORD, params()).unwrap();
+    let b = account::register(PASSWORD, params()).unwrap();
+    assert_ne!(
+        a.bundle.kdf_salt, b.bundle.kdf_salt,
+        "each account gets an independent random salt"
+    );
+}
+
+#[test]
+fn email_normalization_is_identifier_only() {
+    // The e-mail is now an identifier, not a derivation input; normalization
+    // still matters for account lookup but can no longer lock a user out of
+    // their keys.
     assert_eq!(normalize_email("  User@Example.COM \n"), "user@example.com");
-    let a = derive_master_key(PASSWORD, "User@Example.COM", &params()).unwrap();
-    let b = derive_master_key(PASSWORD, "user@example.com", &params()).unwrap();
-    assert_eq!(a, b, "e-mail case/whitespace must not change the key");
 }
 
 #[test]
 fn kdf_rejects_parameters_below_floor() {
+    let salt = generate_salt();
     for bad in [
         KdfParams {
             memory_kib: 1024,
@@ -59,15 +84,21 @@ fn kdf_rejects_parameters_below_floor() {
         },
     ] {
         assert!(
-            derive_master_key(PASSWORD, EMAIL, &bad).is_err(),
+            derive_master_key(PASSWORD, &salt, &bad).is_err(),
             "params {bad:?} must be rejected"
         );
     }
 }
 
 #[test]
+fn kdf_rejects_too_short_salt() {
+    assert!(derive_master_key(PASSWORD, &[0u8; 4], &params()).is_err());
+}
+
+#[test]
 fn subkey_derivation_is_deterministic() {
-    let mk = derive_master_key(PASSWORD, EMAIL, &params()).unwrap();
+    let salt = generate_salt();
+    let mk = derive_master_key(PASSWORD, &salt, &params()).unwrap();
     let (auth1, _) = mk.derive_subkeys();
     let (auth2, _) = mk.derive_subkeys();
     assert_eq!(auth1, auth2, "derivation must be deterministic");
@@ -82,7 +113,7 @@ fn server_known_credential_cannot_decrypt_vault_key() {
     use chacha20poly1305::aead::{Aead, Payload};
     use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
+    let reg = account::register(PASSWORD, params()).unwrap();
     let wrapped = &reg.bundle.master_wrapped_vault_key;
 
     let evil = XChaCha20Poly1305::new((&reg.bundle.auth_credential).into());
@@ -101,16 +132,8 @@ fn server_known_credential_cannot_decrypt_vault_key() {
 
 #[test]
 fn register_then_unlock_roundtrip() {
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
-
-    let unlocked = account::unlock(
-        PASSWORD,
-        EMAIL,
-        &reg.bundle.kdf_params,
-        &reg.bundle.master_wrapped_vault_key,
-    )
-    .unwrap();
-
+    let reg = account::register(PASSWORD, params()).unwrap();
+    let unlocked = unlock(PASSWORD, &reg).unwrap();
     assert_eq!(unlocked.vault_key, reg.secrets.vault_key);
     assert_eq!(
         unlocked.auth_key.to_server_credential(),
@@ -120,14 +143,8 @@ fn register_then_unlock_roundtrip() {
 
 #[test]
 fn wrong_password_fails_to_unlock() {
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
-    let err = account::unlock(
-        "not the password",
-        EMAIL,
-        &reg.bundle.kdf_params,
-        &reg.bundle.master_wrapped_vault_key,
-    )
-    .unwrap_err();
+    let reg = account::register(PASSWORD, params()).unwrap();
+    let err = unlock("not the password", &reg).unwrap_err();
     assert!(matches!(err, CryptoError::Decrypt));
 }
 
@@ -135,15 +152,18 @@ fn wrong_password_fails_to_unlock() {
 fn auth_credential_cannot_unwrap_vault_key() {
     // The server knows the auth credential. Prove that knowing it does not
     // let the server (or a database thief) unwrap the Vault Key: the wrap
-    // used the independent WrappingKey branch.
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
-
-    // An attacker could try using the credential bytes as a wrapping key.
-    // There is no public API for that (by design), which is itself the
-    // guarantee; here we assert the ciphertext is at least AEAD-protected.
+    // used the independent WrappingKey branch. Here we assert the ciphertext
+    // is at least AEAD-protected.
+    let reg = account::register(PASSWORD, params()).unwrap();
     let mut forged = reg.bundle.master_wrapped_vault_key.clone();
     forged.ciphertext[0] ^= 0xff;
-    let err = account::unlock(PASSWORD, EMAIL, &reg.bundle.kdf_params, &forged).unwrap_err();
+    let err = account::unlock(
+        PASSWORD,
+        &reg.bundle.kdf_salt,
+        &reg.bundle.kdf_params,
+        &forged,
+    )
+    .unwrap_err();
     assert!(matches!(err, CryptoError::Decrypt));
 }
 
@@ -235,7 +255,7 @@ fn recovery_code_detects_typos() {
 fn full_recovery_flow_preserves_vault_data() {
     // Register, encrypt an item, "forget" the password, recover with the
     // kit, set a new password — the item must still decrypt.
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
+    let reg = account::register(PASSWORD, params()).unwrap();
     let item = reg
         .secrets
         .vault_key
@@ -246,7 +266,6 @@ fn full_recovery_flow_preserves_vault_data() {
         &reg.recovery_code,
         &reg.bundle.recovery_wrapped_vault_key,
         "brand new master password",
-        EMAIL,
         params(),
     )
     .unwrap();
@@ -260,28 +279,26 @@ fn full_recovery_flow_preserves_vault_data() {
         "new password must produce a new auth credential"
     );
     assert_ne!(
+        recovered.bundle.kdf_salt, reg.bundle.kdf_salt,
+        "recovery issues a fresh salt"
+    );
+    assert_ne!(
         *recovered.recovery_code, *reg.recovery_code,
         "a used recovery kit must be replaced"
     );
 
     // Old password no longer works against the new bundle.
-    assert!(account::unlock(
-        PASSWORD,
-        EMAIL,
-        &recovered.bundle.kdf_params,
-        &recovered.bundle.master_wrapped_vault_key
-    )
-    .is_err());
+    assert!(unlock(PASSWORD, &recovered).is_err());
 }
 
 #[test]
 fn recovery_wrap_cannot_be_confused_with_master_wrap() {
     // Purpose binding: feeding the recovery-wrapped blob into the master
     // unlock path must fail structurally, not just cryptographically.
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
+    let reg = account::register(PASSWORD, params()).unwrap();
     let err = account::unlock(
         PASSWORD,
-        EMAIL,
+        &reg.bundle.kdf_salt,
         &reg.bundle.kdf_params,
         &reg.bundle.recovery_wrapped_vault_key,
     )
@@ -294,25 +311,19 @@ fn recovery_wrap_cannot_be_confused_with_master_wrap() {
 
 #[test]
 fn change_password_keeps_vault_key_and_rotates_credentials() {
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
+    let reg = account::register(PASSWORD, params()).unwrap();
     let item = reg
         .secrets
         .vault_key
         .encrypt_item("item-1", 1, b"still here")
         .unwrap();
 
-    let changed =
-        account::change_password(&reg.secrets, "new password 42", EMAIL, params()).unwrap();
+    let changed = account::change_password(&reg.secrets, "new password 42", params()).unwrap();
 
     assert_ne!(changed.bundle.auth_credential, reg.bundle.auth_credential);
+    assert_ne!(changed.bundle.kdf_salt, reg.bundle.kdf_salt, "fresh salt");
 
-    let unlocked = account::unlock(
-        "new password 42",
-        EMAIL,
-        &changed.bundle.kdf_params,
-        &changed.bundle.master_wrapped_vault_key,
-    )
-    .unwrap();
+    let unlocked = unlock("new password 42", &changed).unwrap();
     assert_eq!(
         unlocked.vault_key.decrypt_item(&item).unwrap(),
         b"still here"
@@ -323,7 +334,6 @@ fn change_password_keeps_vault_key_and_rotates_credentials() {
         &changed.recovery_code,
         &changed.bundle.recovery_wrapped_vault_key,
         "yet another password",
-        EMAIL,
         params(),
     )
     .unwrap();
@@ -338,7 +348,7 @@ fn change_password_keeps_vault_key_and_rotates_credentials() {
 
 #[test]
 fn encrypted_structures_serialize_roundtrip() {
-    let reg = account::register(PASSWORD, EMAIL, params()).unwrap();
+    let reg = account::register(PASSWORD, params()).unwrap();
     let item = reg.secrets.vault_key.encrypt_item("i", 1, b"x").unwrap();
 
     let wrapped_json = serde_json::to_string(&reg.bundle.master_wrapped_vault_key).unwrap();
@@ -347,7 +357,13 @@ fn encrypted_structures_serialize_roundtrip() {
     let wrapped_back: vault_core::WrappedKey = serde_json::from_str(&wrapped_json).unwrap();
     let item_back: vault_core::EncryptedItem = serde_json::from_str(&item_json).unwrap();
 
-    let unlocked = account::unlock(PASSWORD, EMAIL, &reg.bundle.kdf_params, &wrapped_back).unwrap();
+    let unlocked = account::unlock(
+        PASSWORD,
+        &reg.bundle.kdf_salt,
+        &reg.bundle.kdf_params,
+        &wrapped_back,
+    )
+    .unwrap();
     assert_eq!(unlocked.vault_key.decrypt_item(&item_back).unwrap(), b"x");
 }
 

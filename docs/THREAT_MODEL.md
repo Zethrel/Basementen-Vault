@@ -124,6 +124,7 @@ Ordered roughly by priority for post-v1 work.
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
 | Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |
+| `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart (a weak cross-restart enumeration signal). Persisting the secret closes it; deferred, consistent with the existing per-process `dummy_hash`. |
 | Mobile Argon2 parameters possibly conservative | Low | Floor is `m=19 MiB, t=2, p=1`; desktop `m=64 MiB, t=3, p=4`. Benchmark real unlock times per device class and raise toward `m=64–128 MiB` where UX allows — reviewer note. Parameters are per-account and versioned, so raising them later is a normal password-change (`RUNBOOK.md` §KDF migration). |
 | E-mail inbox compromise enables wipe-after-72h | Accepted | By design (§A5): disclosure is worse than denial. |
 | External security audit | **Blocker** | **Required before real-world use** — see RUNBOOK. |

@@ -16,6 +16,8 @@ pub struct RegisterRequest {
     /// base64url of the 32-byte client AuthKey.
     pub auth_credential: String,
     pub kdf_params: KdfParams,
+    /// base64url of the 16-byte random per-account KDF salt (not secret).
+    pub kdf_salt: String,
     /// base64url of the 32-byte recovery verifier (HKDF branch of the
     /// Vault Key); stored hashed, demanded for data-preserving recovery.
     pub recovery_verifier: String,
@@ -35,6 +37,23 @@ fn decode_credential(b64: &str) -> Result<Vec<u8>, ApiError> {
         ));
     }
     Ok(bytes)
+}
+
+fn decode_salt(b64: &str) -> Result<Vec<u8>, ApiError> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(b64)
+        .map_err(|_| ApiError::BadRequest("kdf_salt must be base64url".into()))?;
+    if bytes.len() != 16 {
+        return Err(ApiError::BadRequest("kdf_salt must be 16 bytes".into()));
+    }
+    Ok(bytes)
+}
+
+/// base64url-encode the account's stored salt for the wire.
+pub(crate) fn encode_salt(salt: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(salt)
 }
 
 fn validate_email(email: &str) -> Result<(), ApiError> {
@@ -68,6 +87,7 @@ pub async fn register(
     validate_email(&email)?;
     let credential = decode_credential(&req.auth_credential)?;
     let verifier = decode_credential(&req.recovery_verifier)?;
+    let salt = decode_salt(&req.kdf_salt)?;
     req.kdf_params
         .validate()
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
@@ -94,14 +114,15 @@ pub async fn register(
     let now = security::now();
     let hash = security::hash_credential(&credential);
     let account_id: i64 = sqlx::query_scalar(
-        "INSERT INTO accounts (email, server_auth_hash, kdf_params,
+        "INSERT INTO accounts (email, server_auth_hash, kdf_params, kdf_salt,
                                master_wrapped_vault_key, recovery_wrapped_vault_key,
                                recovery_verifier_hash, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&email)
     .bind(&hash)
     .bind(serde_json::to_string(&req.kdf_params).map_err(|_| ApiError::Internal)?)
+    .bind(salt)
     .bind(req.master_wrapped_vault_key.to_string())
     .bind(req.recovery_wrapped_vault_key.to_string())
     .bind(security::sha256(&verifier))
@@ -201,18 +222,28 @@ pub struct PreloginQuery {
 
 /// GET /api/v1/accounts/prelogin?email=…
 ///
-/// Returns the KDF parameters the client needs before it can derive its
-/// login credential. Anti-enumeration: unknown addresses receive the default
-/// parameters, indistinguishable from a real account that uses them.
+/// Returns the KDF parameters and salt the client needs before it can derive
+/// its login credential. Anti-enumeration: an unknown address receives the
+/// default parameters and a *stable, unpredictable* dummy salt (HMAC of the
+/// e-mail under a server secret), indistinguishable from a real account.
 pub async fn prelogin(
     State(state): State<AppState>,
     Query(q): Query<PreloginQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let email = vault_core::kdf::normalize_email(&q.email);
-    let params = match db::account_by_email(&state.db, &email).await? {
-        Some(account) => serde_json::from_str(&account.kdf_params)
-            .unwrap_or_else(|_| serde_json::to_value(KdfParams::desktop()).expect("static")),
-        None => serde_json::to_value(KdfParams::desktop()).expect("static"),
+    let (params, salt) = match db::account_by_email(&state.db, &email).await? {
+        Some(account) => {
+            let params = serde_json::from_str(&account.kdf_params)
+                .unwrap_or_else(|_| serde_json::to_value(KdfParams::desktop()).expect("static"));
+            (params, account.kdf_salt)
+        }
+        None => (
+            serde_json::to_value(KdfParams::desktop()).expect("static"),
+            security::dummy_kdf_salt(&state.enumeration_secret, &email),
+        ),
     };
-    Ok(Json(json!({ "kdf_params": params })))
+    Ok(Json(json!({
+        "kdf_params": params,
+        "kdf_salt": encode_salt(&salt),
+    })))
 }

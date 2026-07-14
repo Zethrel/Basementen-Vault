@@ -16,12 +16,7 @@ use vault_sync::{sync, LocalVault, PendingOp};
 fn sqlite_vault_persists_items_ops_and_cursor() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vault-local.db");
-    let reg = vault_core::account::register(
-        "pw",
-        "store@example.com",
-        vault_core::KdfParams::mobile_floor(),
-    )
-    .unwrap();
+    let reg = vault_core::account::register("pw", vault_core::KdfParams::mobile_floor()).unwrap();
     let envelope = reg
         .secrets
         .vault_key
@@ -37,6 +32,7 @@ fn sqlite_vault_persists_items_ops_and_cursor() {
                 server_url: "http://home:8080".into(),
                 email: "store@example.com".into(),
                 kdf_params: reg.bundle.kdf_params.clone(),
+                kdf_salt: reg.bundle.kdf_salt.to_vec(),
                 master_wrapped_vault_key: reg.bundle.master_wrapped_vault_key.clone(),
             })
             .unwrap();
@@ -58,10 +54,10 @@ fn sqlite_vault_persists_items_ops_and_cursor() {
     let meta = vault.account_meta().unwrap();
     assert_eq!(meta.email, "store@example.com");
 
-    // The cached wrapped key unlocks offline.
+    // The cached salt + wrapped key unlock offline.
     let secrets = vault_core::account::unlock(
         "pw",
-        &meta.email,
+        &meta.kdf_salt,
         &meta.kdf_params,
         &meta.master_wrapped_vault_key,
     )
@@ -72,9 +68,7 @@ fn sqlite_vault_persists_items_ops_and_cursor() {
 #[test]
 fn sqlite_vault_stage_delete_then_pop() {
     let mut vault = SqliteVault::open_in_memory().unwrap();
-    let reg =
-        vault_core::account::register("pw", "d@example.com", vault_core::KdfParams::mobile_floor())
-            .unwrap();
+    let reg = vault_core::account::register("pw", vault_core::KdfParams::mobile_floor()).unwrap();
     let envelope = reg.secrets.vault_key.encrypt_item("x", 1, b"v").unwrap();
 
     vault.stage(PendingOp::Upsert(envelope));
@@ -202,8 +196,8 @@ async fn api_client_full_lifecycle() {
     let password = "desktop master password";
 
     // Client-side registration + server account creation.
-    let reg = vault_core::account::register(password, email, vault_core::KdfParams::mobile_floor())
-        .unwrap();
+    let reg =
+        vault_core::account::register(password, vault_core::KdfParams::mobile_floor()).unwrap();
     let mut api = ApiClient::new(&base_url);
     api.register(email, &reg.bundle).await.unwrap();
 
@@ -213,9 +207,10 @@ async fn api_client_full_lifecycle() {
         .await
         .unwrap();
 
-    // Prelogin gives back our KDF params.
-    let params = api.prelogin(email).await.unwrap();
-    assert_eq!(params, reg.bundle.kdf_params);
+    // Prelogin gives back our KDF params AND the stored salt.
+    let prelogin = api.prelogin(email).await.unwrap();
+    assert_eq!(prelogin.kdf_params, reg.bundle.kdf_params);
+    assert_eq!(prelogin.kdf_salt, reg.bundle.kdf_salt);
 
     // Login; unlock the vault with what the server returns.
     let outcome = api
@@ -230,7 +225,7 @@ async fn api_client_full_lifecycle() {
         .unwrap();
     let secrets = vault_core::account::unlock(
         password,
-        email,
+        &outcome.kdf_salt,
         &outcome.kdf_params,
         &outcome.master_wrapped_vault_key,
     )
@@ -295,7 +290,6 @@ async fn api_client_recovery_lifecycle() {
 
     let reg = vault_core::account::register(
         "password before amnesia",
-        email,
         vault_core::KdfParams::mobile_floor(),
     )
     .unwrap();
@@ -355,7 +349,6 @@ async fn api_client_recovery_lifecycle() {
         &reg.recovery_code,
         &data.recovery_wrapped_vault_key,
         "password after recovery",
-        &data.email,
         vault_core::KdfParams::mobile_floor(),
     )
     .unwrap();

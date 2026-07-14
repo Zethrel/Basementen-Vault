@@ -120,25 +120,37 @@ cooling-off period.
 
 ## Salt (design note)
 
-The client KDF salt is `HKDF-SHA256(normalized_email)`, deterministic and
-account-specific — **not** secret and **not** random. This is deliberate:
+The client KDF salt is a **random 128-bit per-account value**
+(`kdf::generate_salt`), created once at registration, stored server-side, and
+returned by `prelogin`. The account **e-mail does not enter key derivation**;
+it is an identifier only.
 
-- Argon2id is memory-hard, so per-target precomputation against a *known*
-  e-mail buys an attacker nothing over attacking at crack time (each guess
-  still costs the full memory-hard derivation). Rainbow tables against a
-  memory-hard function are not practical.
-- E-mail addresses are unique → no cross-account amortization, and identical
-  passwords on different accounts derive unrelated keys.
-- A random salt would force a server round-trip before *any* derivation and
-  a migration story, for no meaningful security gain.
-- The server independently applies a **random** per-account salt to its own
-  Argon2id pass over the AuthKey (I10), so the stored authentication hash is
-  never precomputable regardless.
+Rationale (this replaced an earlier e-mail-derived salt after a security
+review — see `docs/REVIEW_RESPONSE.md`):
 
-This matches Bitwarden's approach. If defense-in-depth against a predictable
-salt is ever wanted, `prelogin` already runs before every derivation and
-could return an extra random salt with zero flow changes — noted, not
-adopted for v1.
+- **Robustness:** an e-mail-derived salt required byte-identical e-mail
+  normalization on every platform (Windows/macOS/Linux/Android/iOS/extension)
+  or a user could derive a different key and be locked out. A random salt is
+  independent of identity and removes that entire failure class.
+- **E-mail can change** without touching keys or rewrapping the vault.
+- **No lost benefit:** the only advantage of a deterministic e-mail salt was
+  deriving before contacting the server; our flows already call `prelogin`
+  (which now returns the salt) before every derivation, and offline unlock
+  reads the cached salt from `AccountMeta`.
+- **Standard + auditable:** random-salt-in-DB is what most password managers
+  do and is simpler to reason about.
+
+**Anti-enumeration:** `prelogin` for an unknown e-mail must not reveal that
+the account doesn't exist. It returns a *stable, unpredictable* dummy salt =
+`HMAC-SHA256(server_enumeration_secret, normalized_email)[..16]`. Stable so
+repeated queries match (a real account has a fixed stored salt); unpredictable
+so an attacker without the server secret cannot compute the "expected" dummy
+and diff it against the response. Enforced in `routes/accounts::prelogin` +
+`security::dummy_kdf_salt`; guarded by
+`api_flows::unknown_email_fails_indistinguishably`.
+
+The server additionally applies its own **random** per-account salt to the
+Argon2id pass over the AuthKey (I10), independent of this client salt.
 
 ---
 

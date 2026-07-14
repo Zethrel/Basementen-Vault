@@ -97,14 +97,17 @@ impl TestServer {
 }
 
 fn client_bundle(email: &str, password: &str) -> (vault_core::account::Registration, Value) {
-    let reg = vault_core::account::register(password, email, vault_core::KdfParams::mobile_floor())
+    let reg = vault_core::account::register(password, vault_core::KdfParams::mobile_floor())
         .expect("client-side registration");
+    let _ = email;
     let body = json!({
         "email": email,
         "auth_credential": base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(reg.bundle.auth_credential),
         "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(reg.bundle.recovery_verifier),
+        "kdf_salt": base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(reg.bundle.kdf_salt),
         "kdf_params": reg.bundle.kdf_params,
         "master_wrapped_vault_key": serde_json::to_value(&reg.bundle.master_wrapped_vault_key).unwrap(),
         "recovery_wrapped_vault_key": serde_json::to_value(&reg.bundle.recovery_wrapped_vault_key).unwrap(),
@@ -166,12 +169,16 @@ async fn register_verify_login_and_unlock_vault() {
     assert!(body["access_token"].as_str().unwrap().starts_with("bvat_"));
     assert!(body["refresh_token"].as_str().unwrap().starts_with("bvrt_"));
 
-    // The wrapped key from the login response actually unlocks the vault.
+    // The wrapped key + salt from the login response actually unlock the vault.
     let wrapped: vault_core::WrappedKey =
         serde_json::from_value(body["master_wrapped_vault_key"].clone()).unwrap();
     let params: vault_core::KdfParams = serde_json::from_value(body["kdf_params"].clone()).unwrap();
-    let secrets = vault_core::account::unlock(PASSWORD, EMAIL, &params, &wrapped).unwrap();
+    let salt = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(body["kdf_salt"].as_str().unwrap())
+        .unwrap();
+    let secrets = vault_core::account::unlock(PASSWORD, &salt, &params, &wrapped).unwrap();
     assert_eq!(secrets.vault_key, reg.secrets.vault_key);
+    assert_eq!(salt, reg.bundle.kdf_salt, "login returns the stored salt");
 
     // Access token works against an authenticated endpoint.
     let token = body["access_token"].as_str().unwrap();
@@ -246,17 +253,38 @@ async fn unknown_email_fails_indistinguishably() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"], "invalid_credentials");
 
-    // Prelogin returns plausible default params for unknown accounts.
-    let (status, body) = server
-        .request(
-            "GET",
-            "/api/v1/accounts/prelogin?email=nobody@example.com",
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["kdf_params"]["version"], 1);
+    // Prelogin returns plausible default params AND a salt for unknown
+    // accounts, and that dummy salt is STABLE across repeated queries — an
+    // attacker cannot tell "unknown" (would otherwise re-randomize) from a
+    // real account (stable stored salt).
+    let prelogin = |email: &'static str| {
+        let server = &server;
+        async move {
+            server
+                .request(
+                    "GET",
+                    &format!("/api/v1/accounts/prelogin?email={email}"),
+                    None,
+                    None,
+                )
+                .await
+                .1
+        }
+    };
+    let a = prelogin("nobody@example.com").await;
+    let b = prelogin("nobody@example.com").await;
+    assert_eq!(a["kdf_params"]["version"], 1);
+    assert!(a["kdf_salt"].as_str().unwrap().len() >= 20, "salt present");
+    assert_eq!(
+        a["kdf_salt"], b["kdf_salt"],
+        "dummy salt for an unknown account must be stable across queries"
+    );
+    // A different unknown e-mail gets a different dummy salt.
+    let c = prelogin("someone-else@example.com").await;
+    assert_ne!(a["kdf_salt"], c["kdf_salt"]);
+    // A real account's prelogin returns a salt too.
+    let real = prelogin(EMAIL).await;
+    assert!(real["kdf_salt"].as_str().is_some());
 }
 
 #[tokio::test]

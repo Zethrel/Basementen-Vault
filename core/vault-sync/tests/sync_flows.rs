@@ -143,7 +143,7 @@ async fn bootstrap() -> TestAccount {
     let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new())));
     let app = build_app(state.clone());
 
-    let reg = vault_core::account::register(PASSWORD, EMAIL, vault_core::KdfParams::mobile_floor())
+    let reg = vault_core::account::register(PASSWORD, vault_core::KdfParams::mobile_floor())
         .expect("client registration");
 
     let post = |app: Router, path: &'static str, body: Value| async move {
@@ -169,6 +169,8 @@ async fn bootstrap() -> TestAccount {
                 .encode(reg.bundle.auth_credential),
             "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(reg.bundle.recovery_verifier),
+            "kdf_salt": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(reg.bundle.kdf_salt),
             "kdf_params": reg.bundle.kdf_params,
             "master_wrapped_vault_key": serde_json::to_value(&reg.bundle.master_wrapped_vault_key).unwrap(),
             "recovery_wrapped_vault_key": serde_json::to_value(&reg.bundle.recovery_wrapped_vault_key).unwrap(),
@@ -396,12 +398,9 @@ async fn accounts_are_isolated() {
     sync(&mut device.0, &mut device.1).await.unwrap();
 
     // Second account on the same server.
-    let reg2 = vault_core::account::register(
-        "other password",
-        "other@example.com",
-        vault_core::KdfParams::mobile_floor(),
-    )
-    .unwrap();
+    let reg2 =
+        vault_core::account::register("other password", vault_core::KdfParams::mobile_floor())
+            .unwrap();
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/accounts/register")
@@ -413,6 +412,8 @@ async fn accounts_are_isolated() {
                     .encode(reg2.bundle.auth_credential),
                 "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
                     .encode(reg2.bundle.recovery_verifier),
+                "kdf_salt": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(reg2.bundle.kdf_salt),
                 "kdf_params": reg2.bundle.kdf_params,
                 "master_wrapped_vault_key": serde_json::to_value(&reg2.bundle.master_wrapped_vault_key).unwrap(),
                 "recovery_wrapped_vault_key": serde_json::to_value(&reg2.bundle.recovery_wrapped_vault_key).unwrap(),
@@ -438,6 +439,8 @@ async fn accounts_are_isolated() {
                     .encode(reg2.bundle.auth_credential),
                 "recovery_verifier": base64::engine::general_purpose::URL_SAFE_NO_PAD
                     .encode(reg2.bundle.recovery_verifier),
+                "kdf_salt": base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(reg2.bundle.kdf_salt),
             })
             .to_string(),
         ))

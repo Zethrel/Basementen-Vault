@@ -28,6 +28,10 @@ pub struct AccountMeta {
     pub server_url: String,
     pub email: String,
     pub kdf_params: vault_core::KdfParams,
+    /// Random per-account KDF salt, cached so offline unlock can derive
+    /// without a server round trip. Not secret.
+    #[serde(default)]
+    pub kdf_salt: Vec<u8>,
     pub master_wrapped_vault_key: vault_core::WrappedKey,
 }
 

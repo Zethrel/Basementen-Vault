@@ -237,6 +237,8 @@ pub struct CompleteRequest {
     // The replacement bundle, produced client-side under the new password:
     pub auth_credential: String,
     pub kdf_params: KdfParams,
+    /// base64url of the new 16-byte random KDF salt.
+    pub kdf_salt: String,
     pub master_wrapped_vault_key: Value,
     pub recovery_wrapped_vault_key: Value,
     pub new_recovery_verifier: String,
@@ -282,6 +284,16 @@ pub async fn complete(
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let credential = decode32(&req.auth_credential, "auth_credential")?;
     let new_verifier = decode32(&req.new_recovery_verifier, "new_recovery_verifier")?;
+    let new_salt = {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&req.kdf_salt)
+            .map_err(|_| ApiError::BadRequest("kdf_salt must be base64url".into()))?;
+        if bytes.len() != 16 {
+            return Err(ApiError::BadRequest("kdf_salt must be 16 bytes".into()));
+        }
+        bytes
+    };
 
     // Decide the mode: data-preserving (kit proven) or explicit wipe.
     let preserve_data = match &req.recovery_verifier {
@@ -321,7 +333,7 @@ pub async fn complete(
     }
     sqlx::query(
         "UPDATE accounts SET
-           server_auth_hash = ?, kdf_params = ?,
+           server_auth_hash = ?, kdf_params = ?, kdf_salt = ?,
            master_wrapped_vault_key = ?, recovery_wrapped_vault_key = ?,
            recovery_verifier_hash = ?,
            failed_attempts = 0, lockout_until = NULL
@@ -329,6 +341,7 @@ pub async fn complete(
     )
     .bind(security::hash_credential(&credential))
     .bind(serde_json::to_string(&req.kdf_params).map_err(|_| ApiError::Internal)?)
+    .bind(new_salt)
     .bind(req.master_wrapped_vault_key.to_string())
     .bind(req.recovery_wrapped_vault_key.to_string())
     .bind(security::sha256(&new_verifier))

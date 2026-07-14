@@ -47,6 +47,13 @@ pub struct AppState {
     /// Random-credential hash verified for unknown accounts so login cost is
     /// identical whether or not an e-mail exists.
     pub dummy_hash: Arc<String>,
+    /// Per-process secret used to derive a *stable, unpredictable* dummy KDF
+    /// salt for unknown accounts in prelogin, so an attacker cannot tell a
+    /// real account (stable random salt) from a nonexistent one. Held in
+    /// memory like `dummy_hash`; a restart reshuffles the dummy salts, which
+    /// is a negligible enumeration signal (persisting it further hardens this
+    /// — tracked in the threat model).
+    pub enumeration_secret: Arc<[u8; 32]>,
 }
 
 impl AppState {
@@ -58,6 +65,7 @@ impl AppState {
             ip_limiter: Arc::new(IpLimiter::default()),
             notifier: Arc::new(ChangeNotifier::default()),
             dummy_hash: Arc::new(security::make_dummy_hash()),
+            enumeration_secret: Arc::new(security::random_secret()),
         }
     }
 }

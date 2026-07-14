@@ -36,7 +36,14 @@ pub struct LoginOutcome {
     pub access_token: String,
     pub refresh_token: String,
     pub kdf_params: KdfParams,
+    pub kdf_salt: Vec<u8>,
     pub master_wrapped_vault_key: WrappedKey,
+}
+
+/// KDF parameters + salt returned by prelogin; both needed before deriving.
+pub struct PreloginInfo {
+    pub kdf_params: KdfParams,
+    pub kdf_salt: Vec<u8>,
 }
 
 /// Debug omits the wrapped key blob (it's ciphertext, but no need to log it).
@@ -53,6 +60,20 @@ pub struct ApiClient {
     base_url: String,
     access_token: Option<String>,
     refresh_token: Option<String>,
+}
+
+/// Decode a base64url `kdf_salt` field from a server response.
+fn decode_salt(body: &Value) -> Result<Vec<u8>, ApiError> {
+    let s = body["kdf_salt"]
+        .as_str()
+        .ok_or_else(|| ApiError::Server("missing kdf_salt".into()))?;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(s)
+        .map_err(|_| ApiError::Server("kdf_salt not base64url".into()))
+}
+
+fn b64_bytes(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 fn b64(credential: [u8; 32]) -> String {
@@ -104,7 +125,7 @@ impl ApiClient {
 
     // --- account flows -------------------------------------------------
 
-    pub async fn prelogin(&self, email: &str) -> Result<KdfParams, ApiError> {
+    pub async fn prelogin(&self, email: &str) -> Result<PreloginInfo, ApiError> {
         let resp = self
             .http
             .get(self.url("/api/v1/accounts/prelogin"))
@@ -112,8 +133,11 @@ impl ApiClient {
             .send()
             .await?;
         let body: Value = resp.json().await?;
-        serde_json::from_value(body["kdf_params"].clone())
-            .map_err(|e| ApiError::Server(e.to_string()))
+        Ok(PreloginInfo {
+            kdf_params: serde_json::from_value(body["kdf_params"].clone())
+                .map_err(|e| ApiError::Server(e.to_string()))?,
+            kdf_salt: decode_salt(&body)?,
+        })
     }
 
     pub async fn register(
@@ -129,6 +153,7 @@ impl ApiClient {
                 "auth_credential": b64(bundle.auth_credential),
                 "recovery_verifier": b64(bundle.recovery_verifier),
                 "kdf_params": bundle.kdf_params,
+                "kdf_salt": b64_bytes(&bundle.kdf_salt),
                 "master_wrapped_vault_key": bundle.master_wrapped_vault_key,
                 "recovery_wrapped_vault_key": bundle.recovery_wrapped_vault_key,
             }))
@@ -180,6 +205,7 @@ impl ApiClient {
                 .to_string(),
             kdf_params: serde_json::from_value(body["kdf_params"].clone())
                 .map_err(|e| ApiError::Server(e.to_string()))?,
+            kdf_salt: decode_salt(&body)?,
             master_wrapped_vault_key: serde_json::from_value(
                 body["master_wrapped_vault_key"].clone(),
             )
@@ -297,6 +323,7 @@ impl ApiClient {
                 "wipe": wipe,
                 "auth_credential": b64(bundle.auth_credential),
                 "kdf_params": bundle.kdf_params,
+                "kdf_salt": b64_bytes(&bundle.kdf_salt),
                 "master_wrapped_vault_key": bundle.master_wrapped_vault_key,
                 "recovery_wrapped_vault_key": bundle.recovery_wrapped_vault_key,
                 "new_recovery_verifier": b64(bundle.recovery_verifier),

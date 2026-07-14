@@ -49,6 +49,45 @@ Honesty about this matters more than looking finished:
   tested post-v1 changes rather than rushed in — consistent with the
   "crypto versioning from day one" the reviewer praised.
 
+## Second review — salt design (2026-07)
+
+The reviewer pressed on the e-mail-derived KDF salt: not insecure, but they
+asked us to either justify it or simplify to a random per-account salt, and
+noted the downsides (cross-client e-mail-normalization becomes
+security-critical; changing e-mail becomes awkward).
+
+**We changed it.** On re-examining our own flows, the one benefit that would
+justify an e-mail-derived salt — deriving keys *before* contacting the server
+— we don't use: every online derivation already calls `prelogin` first, and
+offline unlock reads cached account metadata. So we were paying the downsides
+(a real cross-platform lockout risk for a 5-client product, plus e-mail-change
+friction) for a benefit we never spent. The previous doc's "we deliberately
+keep it" stance was, honestly, rationalizing a design that didn't serve us.
+
+What shipped (this commit):
+
+- Client KDF salt is now a **random 128-bit per-account value**
+  (`kdf::generate_salt`); the e-mail no longer enters derivation at all.
+- The salt is stored server-side (`accounts.kdf_salt`), returned by
+  `prelogin`/`login`, cached in `AccountMeta` for offline unlock, and rotated
+  on recovery / password change.
+- **Anti-enumeration preserved:** `prelogin` returns a stable, unpredictable
+  dummy salt (`HMAC(server_secret, email)`) for unknown accounts, so the
+  response is indistinguishable from a real one. New test:
+  `unknown_email_fails_indistinguishably` now also asserts salt stability.
+- `vault-core` signatures dropped the `email` argument
+  (`register`/`login_credential`/`unlock`/`recover_and_rekey`/
+  `change_password`); e-mail is purely an identifier and can now change
+  without touching keys.
+
+Docs updated to match: PLAN §2.1, CRYPTOGRAPHIC_INVARIANTS §Salt. Full suite
+(61 tests) green, including the two-device sync and recovery end-to-end paths
+that would catch any salt-threading inconsistency.
+
+One residual, tracked: the `enumeration_secret` is per-process (like the
+existing `dummy_hash`); persisting it would also hide account existence across
+a server restart. Noted in THREAT_MODEL.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

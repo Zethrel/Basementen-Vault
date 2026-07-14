@@ -2,10 +2,29 @@
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
+use hmac::{Hmac, Mac};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// 32 random bytes from the OS CSPRNG (server-side process secrets).
+pub fn random_secret() -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes
+}
+
+/// A stable, unpredictable 16-byte KDF salt for a *nonexistent* account,
+/// so prelogin responses for unknown e-mails are indistinguishable from real
+/// ones (which return a stored random salt). Deterministic in `email` under
+/// the server's per-process `enumeration_secret`, so repeated queries return
+/// the same value, but unpredictable to anyone without the secret.
+pub fn dummy_kdf_salt(secret: &[u8; 32], normalized_email: &str) -> Vec<u8> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(normalized_email.as_bytes());
+    mac.finalize().into_bytes()[..16].to_vec()
+}
 
 /// Server-side Argon2id parameters for hashing the client's AuthKey.
 /// The client already did a heavy KDF pass; this second pass exists so a

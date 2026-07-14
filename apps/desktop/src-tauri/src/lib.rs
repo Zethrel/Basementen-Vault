@@ -122,8 +122,8 @@ async fn register(
     if password.chars().count() < 12 {
         return Err("master password must be at least 12 characters".into());
     }
-    let reg = vault_core::account::register(&password, &email, vault_core::KdfParams::desktop())
-        .map_err(err)?;
+    let reg =
+        vault_core::account::register(&password, vault_core::KdfParams::desktop()).map_err(err)?;
     let api = ApiClient::new(&server_url);
     api.register(&email, &reg.bundle).await.map_err(err)?;
     Ok(RegisterResult {
@@ -140,10 +140,11 @@ async fn login(
     totp_code: Option<String>,
 ) -> Result<Status, String> {
     let mut api = ApiClient::new(&server_url);
-    let params = api.prelogin(&email).await.map_err(err)?;
-    let credential = vault_core::account::login_credential(&password, &email, &params)
-        .map_err(err)?
-        .to_server_credential();
+    let prelogin = api.prelogin(&email).await.map_err(err)?;
+    let credential =
+        vault_core::account::login_credential(&password, &prelogin.kdf_salt, &prelogin.kdf_params)
+            .map_err(err)?
+            .to_server_credential();
 
     let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "desktop".into());
     let outcome = api
@@ -153,7 +154,7 @@ async fn login(
 
     let secrets = vault_core::account::unlock(
         &password,
-        &email,
+        &outcome.kdf_salt,
         &outcome.kdf_params,
         &outcome.master_wrapped_vault_key,
     )
@@ -165,6 +166,7 @@ async fn login(
             server_url: server_url.clone(),
             email: email.clone(),
             kdf_params: outcome.kdf_params.clone(),
+            kdf_salt: outcome.kdf_salt.clone(),
             master_wrapped_vault_key: outcome.master_wrapped_vault_key.clone(),
         })
         .map_err(err)?;
@@ -198,7 +200,7 @@ async fn unlock(ctx: Ctx<'_>, password: String) -> Result<Status, String> {
 
     let secrets = vault_core::account::unlock(
         &password,
-        &meta.email,
+        &meta.kdf_salt,
         &meta.kdf_params,
         &meta.master_wrapped_vault_key,
     )
@@ -455,7 +457,6 @@ async fn recover_complete(
                 &code,
                 &data.recovery_wrapped_vault_key,
                 &new_password,
-                &data.email,
                 vault_core::KdfParams::desktop(),
             )
             .map_err(|_| "recovery failed — check the Recovery Kit code for typos".to_string())?;
@@ -466,12 +467,9 @@ async fn recover_complete(
             (reg, true)
         }
         _ if wipe => {
-            let reg = vault_core::account::register(
-                &new_password,
-                &data.email,
-                vault_core::KdfParams::desktop(),
-            )
-            .map_err(err)?;
+            let reg =
+                vault_core::account::register(&new_password, vault_core::KdfParams::desktop())
+                    .map_err(err)?;
             api.recovery_complete(&token, &reg.bundle, None, true)
                 .await
                 .map_err(err)?;
@@ -511,7 +509,7 @@ async fn set_backup_email(
     unlocked.autolock.touch();
     let meta = unlocked.vault.account_meta().ok_or("no account metadata")?;
     let credential =
-        vault_core::account::login_credential(&password, &meta.email, &meta.kdf_params)
+        vault_core::account::login_credential(&password, &meta.kdf_salt, &meta.kdf_params)
             .map_err(err)?
             .to_server_credential();
     unlocked
@@ -534,7 +532,7 @@ async fn remove_backup_email(
     unlocked.autolock.touch();
     let meta = unlocked.vault.account_meta().ok_or("no account metadata")?;
     let credential =
-        vault_core::account::login_credential(&password, &meta.email, &meta.kdf_params)
+        vault_core::account::login_credential(&password, &meta.kdf_salt, &meta.kdf_params)
             .map_err(err)?
             .to_server_credential();
     unlocked

@@ -9,6 +9,8 @@ pub struct Account {
     pub email_verified_at: Option<i64>,
     pub server_auth_hash: String,
     pub kdf_params: String,
+    /// Random 128-bit per-account KDF salt (not secret; returned by prelogin).
+    pub kdf_salt: Vec<u8>,
     pub master_wrapped_vault_key: String,
     pub recovery_wrapped_vault_key: String,
     pub failed_attempts: i64,
@@ -46,7 +48,7 @@ pub async fn account_by_email(
     email: &str,
 ) -> Result<Option<Account>, sqlx::Error> {
     sqlx::query_as::<_, Account>(
-        "SELECT id, email, email_verified_at, server_auth_hash, kdf_params,
+        "SELECT id, email, email_verified_at, server_auth_hash, kdf_params, kdf_salt,
                 master_wrapped_vault_key, recovery_wrapped_vault_key,
                 failed_attempts, lockout_until
          FROM accounts WHERE email = ?",
@@ -58,7 +60,7 @@ pub async fn account_by_email(
 
 pub async fn account_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Account>, sqlx::Error> {
     sqlx::query_as::<_, Account>(
-        "SELECT id, email, email_verified_at, server_auth_hash, kdf_params,
+        "SELECT id, email, email_verified_at, server_auth_hash, kdf_params, kdf_salt,
                 master_wrapped_vault_key, recovery_wrapped_vault_key,
                 failed_attempts, lockout_until
          FROM accounts WHERE id = ?",
