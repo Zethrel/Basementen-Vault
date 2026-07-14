@@ -11,7 +11,8 @@ rate-limiting, recovery), offline-first sync, desktop app (also builds for
 Android/iOS from the same codebase), export/import, and hardening. **Not yet
 production-ready:** an external security review is a hard prerequisite before
 real-world use (see the runbook), and several post-v1 hardening items are
-tracked in the threat model.
+tracked in the threat model. See [CHANGELOG.md](CHANGELOG.md) for the full
+development history.
 
 ## Documentation
 
