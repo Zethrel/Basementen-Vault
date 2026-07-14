@@ -47,17 +47,26 @@ pub struct AppState {
     /// Random-credential hash verified for unknown accounts so login cost is
     /// identical whether or not an e-mail exists.
     pub dummy_hash: Arc<String>,
-    /// Per-process secret used to derive a *stable, unpredictable* dummy KDF
-    /// salt for unknown accounts in prelogin, so an attacker cannot tell a
-    /// real account (stable random salt) from a nonexistent one. Held in
-    /// memory like `dummy_hash`; a restart reshuffles the dummy salts, which
-    /// is a negligible enumeration signal (persisting it further hardens this
-    /// — tracked in the threat model).
+    /// Secret used to derive a *stable, unpredictable* dummy KDF salt for
+    /// unknown accounts in prelogin, so an attacker cannot tell a real account
+    /// (stable random salt) from a nonexistent one. **Persisted** in the
+    /// `server_secrets` table and reloaded on boot, so the dummy salts stay
+    /// identical across restarts (closing the cross-restart enumeration signal;
+    /// see `docs/THREAT_MODEL.md`). Falls back to a per-process value only if
+    /// the database read fails, so startup never blocks on it.
     pub enumeration_secret: Arc<[u8; 32]>,
 }
 
 impl AppState {
-    pub fn new(db: SqlitePool, cfg: Config, mailer: Mailer) -> Self {
+    pub async fn new(db: SqlitePool, cfg: Config, mailer: Mailer) -> Self {
+        // Load the persisted enumeration secret (or mint + store one on first
+        // boot) so dummy prelogin salts for unknown accounts stay identical
+        // across restarts. If the DB read fails, fall back to a per-process
+        // secret so the server still boots — degrading only to the old
+        // behaviour, never blocking startup.
+        let enumeration_secret = crate::db::load_or_create_secret(&db, "enumeration_secret")
+            .await
+            .unwrap_or_else(|_| security::random_secret());
         Self {
             db,
             cfg: Arc::new(cfg),
@@ -65,7 +74,7 @@ impl AppState {
             ip_limiter: Arc::new(IpLimiter::default()),
             notifier: Arc::new(ChangeNotifier::default()),
             dummy_hash: Arc::new(security::make_dummy_hash()),
-            enumeration_secret: Arc::new(security::random_secret()),
+            enumeration_secret: Arc::new(enumeration_secret),
         }
     }
 }

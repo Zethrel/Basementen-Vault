@@ -319,37 +319,28 @@ Ordered roughly by priority for post-v1 work.
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
 | Windows crash dumps (WER) not suppressed in-app | Low | On unix, core dumps are suppressed at startup (§A6, done). On Windows, Windows Error Reporting can still capture a crash dump; the app can't fully disable WER from userspace, so operators disable it via policy/registry (RUNBOOK). Keys are still `mlock`'d, limiting what lands in a dump. |
 | Plaintext secrets in the WebView / JS heap | Medium | Inherent to a web-UI password manager: secrets shown/edited live in the JS heap until the view closes, beyond Rust's zeroization. Closing it needs a native-widget or WASM-core UI. Rust-side lifetime is now fully scrubbed (§A6 in-memory map). |
-| `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart. See the exploitability analysis below — it is not practically exploitable; persisting the secret closes even the theoretical signal. Deferred, consistent with the existing per-process `dummy_hash`. |
+| `prelogin` enumeration secret is per-process | **Closed** | The enumeration secret is now persisted in the database (`server_secrets` table, `db::load_or_create_secret`) and reloaded on boot, so an unregistered address's dummy KDF salt is identical before and after a restart — the cross-restart signal analysed below no longer exists. (`dummy_hash` stays per-process by design: its value never leaves the server, so it carries no such signal.) Guarded by `enumeration_secret_persists_across_restarts`. |
 | Bearer access tokens are replayable for ≤15 min | Low | Sender-constrained tokens (DPoP proof-of-possession or mTLS) would eliminate the replay window (§A4b). Deferred; short TTL + rotation + revocation is the v1 posture. |
 | Mobile Argon2 parameters possibly conservative | Low | Floor is `m=19 MiB, t=2, p=1`; desktop `m=64 MiB, t=3, p=4`. Benchmark real unlock times per device class and raise toward `m=64–128 MiB` where UX allows — reviewer note. Parameters are per-account and versioned, so raising them later is a normal password-change (`RUNBOOK.md` §KDF migration). |
 | E-mail inbox compromise enables wipe-after-72h | Accepted | By design (§A5): disclosure is worse than denial. |
 | External security audit | **Blocker** | **Required before real-world use** — see RUNBOOK. |
 
-### Is the per-process `enumeration_secret` restart signal exploitable?
+### The `enumeration_secret` restart signal (now closed)
 
-In practice, no. `prelogin` returns, for an unknown e-mail, a dummy salt
+`prelogin` returns, for an unknown e-mail, a dummy salt
 `HMAC(enumeration_secret, email)` that is stable within a server run and
-indistinguishable from a real account's stored salt. On restart the secret is
-regenerated, so an *unknown* e-mail's dummy salt changes, whereas a *real*
-account's salt (in the DB) stays fixed. An attacker who records salts before
-and after a restart could therefore flag "salt changed across restart ⇒
-probably unregistered."
+indistinguishable from a real account's stored salt. Previously the secret was
+per-process, so a restart regenerated it: an *unknown* e-mail's dummy salt would
+change while a *real* account's salt (in the DB) stayed fixed, giving an
+attacker who recorded salts across a restart a weak "salt changed ⇒ probably
+unregistered" signal.
 
-Why this is not a practical oracle:
-
-- The attacker must **observe a server restart** and re-query the *same*
-  addresses across it. Restarts are infrequent and not attacker-triggerable.
-- A single observation leaks nothing (both real and dummy salts look random
-  and stable). The signal exists only in the *diff* across a restart.
-- It reveals only **existence**, never any secret, credential, or vault
-  content — the same category of leak the whole anti-enumeration design already
-  treats as low severity — and registration/recovery/login are all
-  independently anti-enumerated and rate-limited, so confirmed existence buys
-  an attacker no further step.
-- A legitimate account whose salt is fixed is the *baseline*; the noise floor
-  of normal salt stability makes the inference probabilistic, not certain.
-
-Closing it fully is a one-line change — persist `enumeration_secret` (and
-`dummy_hash`) across restarts, e.g. in a server keyfile — and is tracked above.
-It is deferred only because the exposure is a probabilistic existence hint
-gated on observing a restart, not a usable authentication or disclosure path.
+**Fixed.** The secret is now persisted (`server_secrets` table, loaded on boot),
+so it is identical across restarts and the dummy salt for an unknown address no
+longer changes — the diff the signal depended on is gone. It was always a
+narrow oracle (required observing an infrequent, non-attacker-triggerable
+restart; leaked only *existence*, never a secret or credential; and existence is
+independently anti-enumerated and rate-limited across register/recover/login),
+but it is now closed outright rather than merely bounded. `dummy_hash` remains
+per-process deliberately: its value never leaves the server, so — unlike the
+enumeration secret — it produces no client-observable cross-restart signal.

@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mailer = Mailer::from_config(&cfg.mail).map_err(|e| format!("mailer error: {e}"))?;
 
     let listen = cfg.listen_addr;
-    let state = AppState::new(pool, cfg, mailer);
+    let state = AppState::new(pool, cfg, mailer).await;
     let app = build_app(state);
 
     tracing::info!(%listen, "Basementen Vault server listening");

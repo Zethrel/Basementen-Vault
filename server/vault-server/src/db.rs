@@ -43,6 +43,42 @@ pub async fn connect_in_memory() -> Result<SqlitePool, sqlx::Error> {
     Ok(pool)
 }
 
+/// Load a persisted 32-byte server secret by name, generating and storing one
+/// on first use. Survives restarts, so values derived from it (e.g. the
+/// prelogin dummy salt) stay stable across reboots. Concurrent first-boots are
+/// resolved by `ON CONFLICT DO NOTHING` + re-read, so every caller converges on
+/// the same value.
+pub async fn load_or_create_secret(pool: &SqlitePool, name: &str) -> Result<[u8; 32], sqlx::Error> {
+    if let Some((value,)) =
+        sqlx::query_as::<_, (Vec<u8>,)>("SELECT value FROM server_secrets WHERE name = ?")
+            .bind(name)
+            .fetch_optional(pool)
+            .await?
+    {
+        // We only ever store 32 bytes, so a wrong length is genuine corruption.
+        return <[u8; 32]>::try_from(value.as_slice())
+            .map_err(|_| sqlx::Error::Decode("server secret has wrong length".into()));
+    }
+
+    let fresh = crate::security::random_secret();
+    sqlx::query(
+        "INSERT INTO server_secrets (name, value) VALUES (?, ?)
+         ON CONFLICT(name) DO NOTHING",
+    )
+    .bind(name)
+    .bind(&fresh[..])
+    .execute(pool)
+    .await?;
+
+    // Re-read to get the authoritative row (ours, or a racer's).
+    let (value,): (Vec<u8>,) = sqlx::query_as("SELECT value FROM server_secrets WHERE name = ?")
+        .bind(name)
+        .fetch_one(pool)
+        .await?;
+    <[u8; 32]>::try_from(value.as_slice())
+        .map_err(|_| sqlx::Error::Decode("server secret length".into()))
+}
+
 pub async fn account_by_email(
     pool: &SqlitePool,
     email: &str,

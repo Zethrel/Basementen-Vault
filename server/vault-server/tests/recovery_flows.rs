@@ -96,7 +96,7 @@ async fn setup() -> (Server, vault_core::account::Registration) {
         recovery_cooloff_secs: 72 * 3600,
         mail: MailConfig::Console,
     };
-    let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new())));
+    let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new()))).await;
     let server = Server {
         app: build_app(state.clone()),
         state,

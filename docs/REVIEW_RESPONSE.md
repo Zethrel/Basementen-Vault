@@ -84,9 +84,10 @@ Docs updated to match: PLAN §2.1, CRYPTOGRAPHIC_INVARIANTS §Salt. Full suite
 (61 tests) green, including the two-device sync and recovery end-to-end paths
 that would catch any salt-threading inconsistency.
 
-One residual, tracked: the `enumeration_secret` is per-process (like the
-existing `dummy_hash`); persisting it would also hide account existence across
-a server restart. Noted in THREAT_MODEL.
+One residual was tracked here: the `enumeration_secret` was per-process, so it
+reshuffled on restart. **Now closed** — it is persisted in the database and
+reloaded on boot (see the 1.0 hardening note below). `dummy_hash` stays
+per-process by design (its value never leaves the server).
 
 ## Third review — salt lifetime, and the "edges" (2026-07)
 
@@ -400,6 +401,18 @@ Same `forbid(unsafe)` discipline as `mlock`: the syscalls live in the target-
 gated `rlimit` / `prctl` dependencies (no-op on non-unix), never in our code.
 Guarded by `harden::tests`. This leaves the client memory posture with only the
 two inherent residuals — the JS heap and a live attacker on an unlocked device.
+
+## Post-milestone hardening — persist the enumeration secret (2026-07)
+
+Closed the last low-severity anti-enumeration residual. The `enumeration_secret`
+(which derives the stable dummy prelogin salt for unknown accounts) is now
+stored in the database (`server_secrets` table, `db::load_or_create_secret`,
+minted on first boot) and reloaded on startup, so an unregistered address's
+dummy salt is identical before and after a restart — the cross-restart
+"salt changed ⇒ probably unregistered" signal no longer exists. If the DB read
+ever fails the server falls back to a per-process secret rather than refusing to
+boot. `dummy_hash` intentionally stays per-process (its value never leaves the
+server). Guarded by `enumeration_secret_persists_across_restarts`.
 
 ## Standing invitation
 

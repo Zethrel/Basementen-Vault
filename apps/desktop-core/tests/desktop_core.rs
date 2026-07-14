@@ -180,7 +180,8 @@ async fn spawn_server() -> (String, vault_server::state::AppState) {
         pool,
         cfg,
         vault_server::mailer::Mailer::Memory(Mutex::new(Vec::new())),
-    );
+    )
+    .await;
     let app = vault_server::build_app(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

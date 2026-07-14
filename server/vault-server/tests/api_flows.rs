@@ -39,7 +39,7 @@ async fn test_server() -> TestServer {
         recovery_cooloff_secs: 72 * 3600,
         mail: MailConfig::Console,
     };
-    let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new())));
+    let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new()))).await;
     TestServer {
         app: build_app(state.clone()),
         state,
@@ -1066,4 +1066,42 @@ async fn recovery_codes_status_and_regeneration() {
     );
     let (status, _) = login(&server, &reg, json!({ "recovery_code": fresh[0] })).await;
     assert_eq!(status, StatusCode::OK, "fresh codes work");
+}
+
+#[tokio::test]
+async fn enumeration_secret_persists_across_restarts() {
+    // The enumeration secret must be stable across server restarts so an
+    // unregistered address's dummy prelogin salt looks identical before and
+    // after a reboot (closing a cross-restart enumeration signal).
+    fn cfg() -> Config {
+        Config {
+            listen_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            db_path: ":memory:".into(),
+            base_url: "http://vault.test".into(),
+            registration_open: true,
+            trust_proxy: false,
+            recovery_cooloff_secs: 72 * 3600,
+            mail: MailConfig::Console,
+        }
+    }
+
+    let pool = db::connect_in_memory().await.expect("db");
+    let boot = |p| async { AppState::new(p, cfg(), Mailer::Memory(Mutex::new(Vec::new()))).await };
+
+    // Two "boots" against the same database converge on the same secret.
+    let s1 = boot(pool.clone()).await;
+    let s2 = boot(pool.clone()).await;
+    assert_eq!(
+        *s1.enumeration_secret, *s2.enumeration_secret,
+        "the persisted secret survives a restart"
+    );
+
+    // A different database mints an independent secret (proving it's persisted,
+    // not a hard-coded constant).
+    let other_pool = db::connect_in_memory().await.expect("db");
+    let s3 = boot(other_pool).await;
+    assert_ne!(
+        *s1.enumeration_secret, *s3.enumeration_secret,
+        "a separate database has its own secret"
+    );
 }

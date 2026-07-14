@@ -140,7 +140,7 @@ async fn bootstrap() -> TestAccount {
         recovery_cooloff_secs: 72 * 3600,
         mail: MailConfig::Console,
     };
-    let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new())));
+    let state = AppState::new(pool, cfg, Mailer::Memory(Mutex::new(Vec::new()))).await;
     let app = build_app(state.clone());
 
     let reg = vault_core::account::register(PASSWORD, vault_core::KdfParams::mobile_floor())
