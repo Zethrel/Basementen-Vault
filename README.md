@@ -23,6 +23,7 @@ tracked in the threat model.
 | [METADATA.md](docs/METADATA.md) | Exactly what a compromised server can and cannot observe |
 | [SELF_HOSTING.md](docs/SELF_HOSTING.md) | Running it at home (SQLite, SMTP, TLS/VPN, backups) |
 | [RUNBOOK.md](docs/RUNBOOK.md) | Backups, upgrades, KDF migration, incident response |
+| [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) | Step-by-step gate for cutting a signed, verified release |
 | [MOBILE.md](docs/MOBILE.md) | Android / iOS build steps |
 | [REVIEW_RESPONSE.md](docs/REVIEW_RESPONSE.md) | Response to the security architecture review |
 | [SECURITY.md](SECURITY.md) | How to report a vulnerability, scope, and safe harbor |
