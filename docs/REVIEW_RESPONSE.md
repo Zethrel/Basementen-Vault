@@ -21,8 +21,9 @@ Honesty about this matters more than looking finished:
   answers the reviewer's concern #1.
 - **Registration password checks.** The plan implied `zxcvbn` + HIBP were
   implemented; at the time only the ≥12-char minimum was. Reworded to "as
-  built" vs "backlog." (Composition rules — capital + number + special — were
-  added later; see the 1.0 hardening note below. `zxcvbn`/HIBP remain backlog.)
+  built" vs "backlog." (Composition rules, the HIBP breach check, and `zxcvbn`
+  scoring were all added later — see the 1.0 hardening notes below; the gap is
+  now closed.)
 - **Verification token.** Described as "signed"; it is actually a random
   token stored as SHA-256. Corrected.
 
@@ -425,10 +426,10 @@ a weaker password. Lives in `desktop_core::check_password_strength`, which
 returns a single message naming every unmet requirement; the setup and recovery
 screens show the rule up front. Guarded by `password::tests`.
 
-Honest scope note: composition rules stop trivially weak inputs but don't catch
-a long-but-breached passphrase. The stronger complements — a Have I Been Pwned
-k-anonymity check and `zxcvbn` entropy scoring — remain backlog (THREAT_MODEL
-gaps), now downgraded to Low since basic strength is enforced.
+Scope note at the time: composition rules stop trivially weak inputs but not a
+long-but-breached passphrase. The stronger complements — a Have I Been Pwned
+k-anonymity check and `zxcvbn` entropy scoring — were then added in the two
+hardening passes below, closing the gap.
 
 ## Post-milestone hardening — breached-password check (2026-07)
 
@@ -447,6 +448,22 @@ transparency. Guarded by `hibp::tests` (pure prefix/suffix + response parsing).
 
 This leaves only `zxcvbn`-style entropy scoring on the password-strength gap
 (Low) — structurally weak but unbreached inputs.
+
+## Post-milestone hardening — zxcvbn guessability scoring (2026-07)
+
+Added the final password-strength check: `desktop_core::check_password_
+guessability` runs a zxcvbn-style estimator and rejects any master password
+scoring below "safely unguessable" (3 of 4). This catches the class that
+composition rules and the breach corpus both miss — `Password123!`, keyboard
+walks, dictionary words, dates, and passwords derived from the account e-mail
+(passed as a user-input so they're penalised). The rejection message includes
+zxcvbn's own warning/suggestion so the user learns why. Runs at registration
+*and* recovery, after the composition check. Guarded by `password::tests`
+(rejects a composition-passing-but-common password, accepts a high-entropy one,
+and rejects a password equal to a supplied user input).
+
+With composition rules + HIBP breach check + zxcvbn scoring all in place, the
+master-password-strength gap is **closed** for v1 (THREAT_MODEL gaps table).
 
 ## Standing invitation
 

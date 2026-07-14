@@ -167,6 +167,7 @@ async fn register(
 ) -> Result<RegisterResult, String> {
     let password = Zeroizing::new(password);
     desktop_core::check_password_strength(&password)?;
+    desktop_core::check_password_guessability(&password, &[email.as_str()])?;
     reject_if_breached(&password).await?;
     let reg =
         vault_core::account::register(&password, vault_core::KdfParams::desktop()).map_err(err)?;
@@ -497,6 +498,7 @@ async fn recover_complete(
     let new_password = Zeroizing::new(new_password);
     let recovery_code = recovery_code.map(Zeroizing::new);
     desktop_core::check_password_strength(&new_password)?;
+    desktop_core::check_password_guessability(&new_password, &[])?;
     reject_if_breached(&new_password).await?;
     let api = ApiClient::new(&server_url);
     let data = api.recovery_data(&token).await.map_err(|e| match e {

@@ -115,10 +115,13 @@ master password + random per-account salt (from prelogin)
    only the first 5 hex chars of the password's SHA-1 and matches the returned
    suffixes locally, so the password never leaves the device; a match is
    rejected. The breach check is best-effort (skipped if HIBP is unreachable,
-   e.g. an offline deployment). Enforcement is client-side by necessity: the
-   server is zero-knowledge and never receives the password. **Backlog:** local
-   `zxcvbn` entropy scoring for structurally weak-but-unbreached inputs. Tracked
-   in `THREAT_MODEL.md` §Known gaps.
+   e.g. an offline deployment). A third check, **`zxcvbn` guessability scoring**
+   (`desktop_core::check_password_guessability`), rejects passwords scoring below
+   "safely unguessable" (3/4) — common/dictionary/keyboard-walk/date passwords
+   and ones resembling the account e-mail — catching structurally weak inputs
+   that pass composition and aren't in a breach corpus. All three run at
+   registration *and* recovery. Enforcement is client-side by necessity: the
+   server is zero-knowledge and never receives the password.
 2. Client derives MK → AuthKey + WrappingKey, generates VK, wraps VK.
 3. Client sends: e-mail, AuthKey, wrapped VK, KDF parameters.
 4. Server Argon2id-hashes the AuthKey, stores the record, and sends a

@@ -43,6 +43,35 @@ pub fn check_password_strength(password: &str) -> Result<(), String> {
     }
 }
 
+/// Minimum acceptable zxcvbn score (0–4). 3 = "safely unguessable" under an
+/// offline slow-hash attack — the right bar for a master password.
+const MIN_ZXCVBN_SCORE: zxcvbn::Score = zxcvbn::Score::Three;
+
+/// Reject a password that the composition rules accept but a zxcvbn-style
+/// estimator finds too guessable: common passwords, dictionary words, keyboard
+/// walks, dates, repeats, or anything resembling `user_inputs` (pass the e-mail
+/// so an address-derived password is penalised). Complements
+/// [`check_password_strength`]; run it *after* the composition check.
+///
+/// Returns a message that includes zxcvbn's own warning/suggestion when it has
+/// one, so the user learns *why* it was rejected.
+pub fn check_password_guessability(password: &str, user_inputs: &[&str]) -> Result<(), String> {
+    let entropy = zxcvbn::zxcvbn(password, user_inputs);
+    if entropy.score() >= MIN_ZXCVBN_SCORE {
+        return Ok(());
+    }
+    let mut msg = String::from("This password is too easy to guess.");
+    if let Some(feedback) = entropy.feedback() {
+        if let Some(warning) = feedback.warning() {
+            msg.push_str(&format!(" {warning}"));
+        }
+        if let Some(suggestion) = feedback.suggestions().first() {
+            msg.push_str(&format!(" {suggestion}"));
+        }
+    }
+    Err(msg)
+}
+
 /// Join clauses as "a, b, and c" (Oxford comma), or "a and b", or "a".
 fn join_with_and(items: &[&str]) -> String {
     match items {
@@ -96,5 +125,30 @@ mod tests {
         assert!(check_password_strength("Abcd 1234 wxyz")
             .unwrap_err()
             .contains("a special character"));
+    }
+
+    #[test]
+    fn guessability_rejects_common_but_composition_passing_passwords() {
+        // Passes composition (upper, lower, digit, special, 12+) yet is a
+        // textbook weak password — zxcvbn must catch it.
+        assert!(check_password_strength("Password123!").is_ok());
+        let err = check_password_guessability("Password123!", &[]).unwrap_err();
+        assert!(err.to_lowercase().contains("guess"), "{err}");
+    }
+
+    #[test]
+    fn guessability_accepts_a_high_entropy_password() {
+        assert!(check_password_guessability("7#kQ9mZ!vB2wLxr", &[]).is_ok());
+    }
+
+    #[test]
+    fn guessability_penalises_user_inputs() {
+        // A distinctive string scores well on its own, but reusing it verbatim
+        // as the password is caught once it's supplied as context (the e-mail).
+        let email = "Zaphod-Beeblebrox-42@example.com";
+        assert!(
+            check_password_guessability(email, &[email]).is_err(),
+            "a password equal to a known user input must be rejected"
+        );
     }
 }
