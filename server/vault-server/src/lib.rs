@@ -85,6 +85,10 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route("/api/v1/vault/events", get(routes::items::events))
         .route(
+            "/api/v1/vault/checkpoint",
+            get(routes::items::get_checkpoint).put(routes::items::put_checkpoint),
+        )
+        .route(
             "/api/v1/accounts/recovery/start",
             post(routes::recovery::start),
         )

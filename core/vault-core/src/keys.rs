@@ -11,6 +11,7 @@ pub const KEY_LEN: usize = 32;
 const INFO_AUTH: &[u8] = b"basementen-vault/v1/auth-key";
 const INFO_WRAP: &[u8] = b"basementen-vault/v1/wrapping-key";
 const INFO_RECOVERY_VERIFIER: &[u8] = b"basementen-vault/v1/recovery-verifier";
+const INFO_SYNC_CHECKPOINT: &[u8] = b"basementen-vault/v1/sync-checkpoint";
 
 macro_rules! key_type {
     ($(#[$doc:meta])* $name:ident) => {
@@ -115,6 +116,28 @@ impl VaultKey {
         hk.expand(INFO_RECOVERY_VERIFIER, &mut out)
             .expect("32 bytes is a valid HKDF-SHA256 output length");
         out
+    }
+
+    /// A sync-checkpoint tag authenticating a global sequence number under the
+    /// Vault Key. HKDF used as a PRF: the tag is a deterministic function of
+    /// `(vault key, seq)`, so any device with the key computes the same tag
+    /// and an untrusted server can neither forge one nor claim a higher seq
+    /// than a device actually reached. Used to detect whole-vault rollback
+    /// across devices (see `docs/THREAT_MODEL.md` §A2).
+    pub fn sync_checkpoint_tag(&self, seq: i64) -> [u8; KEY_LEN] {
+        let mut info = Vec::with_capacity(INFO_SYNC_CHECKPOINT.len() + 8);
+        info.extend_from_slice(INFO_SYNC_CHECKPOINT);
+        info.extend_from_slice(&seq.to_le_bytes());
+        let hk = Hkdf::<Sha256>::new(None, self.as_bytes());
+        let mut out = [0u8; KEY_LEN];
+        hk.expand(&info, &mut out)
+            .expect("32 bytes is a valid HKDF-SHA256 output length");
+        out
+    }
+
+    /// Constant-time verification of a checkpoint tag.
+    pub fn verify_sync_checkpoint(&self, seq: i64, tag: &[u8]) -> bool {
+        self.sync_checkpoint_tag(seq).as_slice().ct_eq(tag).into()
     }
 }
 

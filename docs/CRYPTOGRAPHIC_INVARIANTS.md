@@ -27,6 +27,7 @@ where relevant, adding a guarding test.
 10. Secret material is zeroized and never logged or `Debug`-printed. *(I8, I9)*
 11. Recovery never becomes "prove control of e-mail → receive vault". *(I11)*
 12. The KDF salt is account-lifetime (never rotated). *(I13)*
+13. The sync sequence is authenticated against whole-vault rollback. *(I14)*
 
 The numbered invariants below give the enforcement point and guarding test
 for each. (Rules 1–8 map to the reviewer's proposed checklist.)
@@ -151,6 +152,20 @@ equality check before use.
 - **Guarded by:** `crypto_flows::item_binds_version_in_aad`,
   `recovery_wrap_cannot_be_confused_with_master_wrap`, and the export
   round-trip/tamper proptests.
+
+### I14 — Sync sequence is authenticated against rollback
+The global sync sequence is defended two ways: every client keeps a durable
+monotonic `last_seq` and refuses a pull that regresses below it; and clients
+publish a vault-key-MAC'd checkpoint `HKDF(VaultKey, "sync-checkpoint" ‖ seq)`
+that any device verifies and the server can neither forge nor raise. A server
+serving data below a checkpoint it presents is caught as withholding.
+- **Enforced:** `vault-sync::engine` (monotonic guard),
+  `keys.rs::VaultKey::{sync_checkpoint_tag, verify_sync_checkpoint}`,
+  `desktop-core::rollback::synchronize`, server `routes/items` checkpoint.
+- **Guarded by:** `sync_flows::server_rollback_is_detected`,
+  `crypto_flows::sync_checkpoint_tag_is_deterministic_key_and_seq_bound`,
+  `desktop_core::{checkpoint_published_and_verified, forged_checkpoint_is_rejected,
+  withholding_committed_data_is_detected}`.
 
 ### I13 — The KDF salt is account-lifetime
 A random salt is generated once at registration and **never rotated** — not

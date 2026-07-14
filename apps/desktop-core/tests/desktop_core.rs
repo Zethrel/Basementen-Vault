@@ -516,3 +516,124 @@ async fn api_client_session_management() {
     // Only the laptop remains.
     assert_eq!(api_a.list_sessions().await.unwrap().len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Rollback-protected sync (checkpoint)
+
+/// Register + verify + login, returning (api, secrets).
+async fn account_ready(
+    base_url: &str,
+    state: &vault_server::state::AppState,
+    email: &str,
+) -> (ApiClient, vault_core::account::AccountSecrets) {
+    let reg = vault_core::account::register(
+        "master password here",
+        vault_core::KdfParams::mobile_floor(),
+    )
+    .unwrap();
+    let mut api = ApiClient::new(base_url);
+    api.register(email, &reg.bundle).await.unwrap();
+    sqlx::query("UPDATE accounts SET email_verified_at = 1")
+        .execute(&state.db)
+        .await
+        .unwrap();
+    api.login(
+        email,
+        reg.secrets.auth_key.to_server_credential(),
+        None,
+        None,
+        "dev",
+    )
+    .await
+    .unwrap();
+    (api, reg.secrets)
+}
+
+#[tokio::test]
+async fn checkpoint_published_and_verified() {
+    let (base_url, state) = spawn_server().await;
+    let (mut api, secrets) = account_ready(&base_url, &state, "cp@example.com").await;
+
+    let mut vault = SqliteVault::open_in_memory().unwrap();
+    vault.stage(PendingOp::Upsert(
+        secrets.vault_key.encrypt_item("a", 1, b"one").unwrap(),
+    ));
+    desktop_core::synchronize(&mut vault, &mut api, &secrets.vault_key)
+        .await
+        .unwrap();
+
+    // The server now holds an authentic checkpoint at the current seq.
+    let (seq, tag) = api.get_checkpoint().await.unwrap().unwrap();
+    assert_eq!(seq, vault.last_seq());
+    assert!(secrets.vault_key.verify_sync_checkpoint(seq, &tag));
+}
+
+#[tokio::test]
+async fn forged_checkpoint_is_rejected() {
+    let (base_url, state) = spawn_server().await;
+    let (mut api, secrets) = account_ready(&base_url, &state, "forge@example.com").await;
+    let mut vault = SqliteVault::open_in_memory().unwrap();
+    vault.stage(PendingOp::Upsert(
+        secrets.vault_key.encrypt_item("a", 1, b"one").unwrap(),
+    ));
+    desktop_core::synchronize(&mut vault, &mut api, &secrets.vault_key)
+        .await
+        .unwrap();
+
+    // A malicious server plants a checkpoint claiming a huge seq with a bogus
+    // tag (it lacks the Vault Key). The client must reject it.
+    sqlx::query("UPDATE accounts SET checkpoint_seq = 9999, checkpoint_tag = ?")
+        .bind(vec![7u8; 32])
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+    let err = desktop_core::synchronize(&mut vault, &mut api, &secrets.vault_key)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, desktop_core::SyncError::CheckpointForged),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn withholding_committed_data_is_detected() {
+    let (base_url, state) = spawn_server().await;
+    let (mut api, secrets) = account_ready(&base_url, &state, "withhold@example.com").await;
+    let mut vault = SqliteVault::open_in_memory().unwrap();
+    vault.stage(PendingOp::Upsert(
+        secrets.vault_key.encrypt_item("a", 1, b"one").unwrap(),
+    ));
+    desktop_core::synchronize(&mut vault, &mut api, &secrets.vault_key)
+        .await
+        .unwrap();
+    let good_seq = vault.last_seq();
+
+    // The server presents an AUTHENTIC checkpoint for a higher seq (as if the
+    // client had committed more) but rewinds the actual item data/sequence
+    // below it — i.e. it is withholding committed writes. Forge an authentic
+    // tag by using the real Vault Key (simulating what a legit device wrote),
+    // then drop the served sequence.
+    let ahead = good_seq + 5;
+    let tag = secrets.vault_key.sync_checkpoint_tag(ahead);
+    sqlx::query("UPDATE accounts SET checkpoint_seq = ?, checkpoint_tag = ?, sync_seq = ?")
+        .bind(ahead)
+        .bind(tag.to_vec())
+        .bind(good_seq) // served data only up to good_seq
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+    // A fresh device (no local floor) syncs: the authentic checkpoint says
+    // seq >= ahead, but the server only serves up to good_seq → withholding.
+    let mut fresh = SqliteVault::open_in_memory().unwrap();
+    let err = desktop_core::synchronize(&mut fresh, &mut api, &secrets.vault_key)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, desktop_core::SyncError::Withholding { checkpoint, served }
+            if checkpoint == ahead && served == good_seq),
+        "got {err:?}"
+    );
+}

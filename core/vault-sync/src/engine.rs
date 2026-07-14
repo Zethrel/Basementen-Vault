@@ -8,6 +8,14 @@ use crate::types::{
 pub enum SyncEngineError {
     #[error(transparent)]
     Transport(#[from] TransportError),
+
+    /// The server reported a global sequence lower than one this device has
+    /// already durably observed — i.e. the whole vault was rolled back
+    /// (malicious rollback, or an accidental restore from an old backup).
+    /// Sync aborts without touching the local replica; the app must alert the
+    /// user rather than silently discard newer state.
+    #[error("rollback detected: server seq {server_seq} < local high-water mark {local_seq}")]
+    RollbackDetected { local_seq: i64, server_seq: i64 },
 }
 
 /// Run one full sync cycle.
@@ -26,9 +34,21 @@ pub async fn sync<V: LocalVault, T: SyncTransport>(
     transport: &mut T,
 ) -> Result<SyncReport, SyncEngineError> {
     let mut report = SyncReport::default();
+    let floor = vault.last_seq();
 
     // --- Pull ---------------------------------------------------------
-    let pull = transport.pull(vault.last_seq()).await?;
+    let pull = transport.pull(floor).await?;
+    // Rollback guard: the global sequence is monotonic, so the server can
+    // never legitimately report a value below what we've already applied —
+    // not even during a full resync (which only happens when the client is
+    // *behind* the purge horizon). A lower value means the vault was rewound.
+    // Abort before mutating anything.
+    if pull.latest_seq < floor {
+        return Err(SyncEngineError::RollbackDetected {
+            local_seq: floor,
+            server_seq: pull.latest_seq,
+        });
+    }
     if pull.full_resync {
         // Replica may contain items whose deletion we never heard about.
         // Rebuild from the snapshot — but keep the op queue: local edits
@@ -112,6 +132,13 @@ pub async fn sync<V: LocalVault, T: SyncTransport>(
     // cheap pull picks up the authoritative cursor (and anything a second
     // device wrote mid-sync).
     let tail = transport.pull(pull.latest_seq).await?;
+    // The cursor must only ever advance; guard the tail pull too.
+    if tail.latest_seq < pull.latest_seq {
+        return Err(SyncEngineError::RollbackDetected {
+            local_seq: pull.latest_seq,
+            server_seq: tail.latest_seq,
+        });
+    }
     if !tail.full_resync {
         for item in &tail.items {
             vault.apply_remote(item);

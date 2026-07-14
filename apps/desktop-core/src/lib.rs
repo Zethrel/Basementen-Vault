@@ -8,6 +8,7 @@
 pub mod api;
 pub mod generator;
 pub mod items;
+pub mod rollback;
 pub mod session;
 pub mod store;
 pub mod transfer;
@@ -15,6 +16,7 @@ pub mod transfer;
 pub use api::{ApiClient, ApiError, LoginOutcome, PreloginInfo, RecoveryData, SessionInfo};
 pub use generator::{generate_password, GeneratorOptions};
 pub use items::{Item, ItemSummary};
+pub use rollback::{synchronize, SyncError};
 pub use session::AutoLock;
 pub use store::SqliteVault;
 pub use transfer::{export_encrypted, import_csv, import_encrypted, TransferError};

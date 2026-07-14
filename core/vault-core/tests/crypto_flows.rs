@@ -400,3 +400,23 @@ fn export_envelope_roundtrip() {
     assert_eq!(&*back, b"backup payload");
     assert!(vault_core::decrypt_export(&envelope, "other").is_err());
 }
+
+// ---------------------------------------------------------------------------
+// Sync checkpoint MAC
+
+#[test]
+fn sync_checkpoint_tag_is_deterministic_key_and_seq_bound() {
+    let vk = VaultKey::generate();
+    let a = vk.sync_checkpoint_tag(42);
+    assert_eq!(a, vk.sync_checkpoint_tag(42), "deterministic in (key, seq)");
+    assert_ne!(a, vk.sync_checkpoint_tag(43), "seq-bound");
+    assert_ne!(
+        a,
+        VaultKey::generate().sync_checkpoint_tag(42),
+        "key-bound: another vault can't forge it"
+    );
+    assert!(vk.verify_sync_checkpoint(42, &a));
+    assert!(!vk.verify_sync_checkpoint(43, &a));
+    assert!(!vk.verify_sync_checkpoint(42, &[0u8; 32]));
+    assert!(!vk.verify_sync_checkpoint(42, b"short"));
+}

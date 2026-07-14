@@ -59,11 +59,38 @@ fn decrypt_refresh_token(secrets: &AccountSecrets, vault: &SqliteVault) -> Optio
     String::from_utf8(bytes).ok()
 }
 
-/// Best-effort sync: offline is not an error, the op queue just waits.
-async fn try_sync(unlocked: &mut Unlocked) -> Option<vault_sync::SyncReport> {
-    vault_sync::sync(&mut unlocked.vault, &mut unlocked.api)
-        .await
-        .ok()
+/// Outcome of a best-effort sync.
+enum SyncOutcome {
+    Synced(vault_sync::SyncReport),
+    /// Offline / transient network or session error — benign, the queue waits.
+    Offline,
+    /// A rollback / withholding / forged-checkpoint alarm. Never silently
+    /// swallowed: the server may be compromised or restored from an old backup.
+    Alert(String),
+}
+
+/// Rollback-protected best-effort sync. Distinguishes benign offline from a
+/// security alert that must reach the user.
+async fn try_sync(unlocked: &mut Unlocked) -> SyncOutcome {
+    match desktop_core::synchronize(
+        &mut unlocked.vault,
+        &mut unlocked.api,
+        &unlocked.secrets.vault_key,
+    )
+    .await
+    {
+        Ok(report) => SyncOutcome::Synced(report),
+        Err(
+            e @ desktop_core::SyncError::Engine(vault_sync::SyncEngineError::RollbackDetected {
+                ..
+            }),
+        )
+        | Err(e @ desktop_core::SyncError::CheckpointForged)
+        | Err(e @ desktop_core::SyncError::Withholding { .. }) => SyncOutcome::Alert(e.to_string()),
+        // Transport / network / session errors: treat as offline; the op queue
+        // and local replica are intact and will sync when connectivity returns.
+        Err(_) => SyncOutcome::Offline,
+    }
 }
 
 fn persist_rotated_refresh_token(unlocked: &Unlocked) {
@@ -352,7 +379,14 @@ async fn sync_now(ctx: Ctx<'_>) -> Result<SyncSummary, String> {
     let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
     unlocked.autolock.touch();
     match try_sync(unlocked).await {
-        Some(report) => {
+        // A rollback/withholding/forgery alarm is surfaced as a hard error so
+        // the UI shows it prominently instead of pretending all is well.
+        SyncOutcome::Alert(msg) => Err(format!(
+            "⚠ Sync stopped: {msg}. Your local vault is unchanged. If you did \
+             not restore the server from a backup, treat this as a possible \
+             compromise."
+        )),
+        SyncOutcome::Synced(report) => {
             persist_rotated_refresh_token(unlocked);
             // Materialize losing edits as "(conflicted copy)" items so no
             // keystroke is ever silently discarded. The copies are new items
@@ -395,7 +429,7 @@ async fn sync_now(ctx: Ctx<'_>) -> Result<SyncSummary, String> {
                 offline: false,
             })
         }
-        None => Ok(SyncSummary {
+        SyncOutcome::Offline => Ok(SyncSummary {
             pushed: 0,
             pulled: 0,
             conflicts: 0,

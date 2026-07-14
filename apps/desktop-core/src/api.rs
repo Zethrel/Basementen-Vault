@@ -402,6 +402,49 @@ impl ApiClient {
         }
     }
 
+    // --- rollback checkpoint ---------------------------------------------
+
+    /// Fetch the account's stored rollback checkpoint `(seq, tag)`, if any.
+    pub async fn get_checkpoint(&mut self) -> Result<Option<(i64, Vec<u8>)>, ApiError> {
+        let (status, body) = self
+            .authed(|http, base, token| {
+                http.get(format!("{base}/api/v1/vault/checkpoint"))
+                    .bearer_auth(token)
+            })
+            .await?;
+        if !status.is_success() {
+            return Err(Self::classify(status, &body));
+        }
+        let cp = &body["checkpoint"];
+        if cp.is_null() {
+            return Ok(None);
+        }
+        let seq = cp["seq"]
+            .as_i64()
+            .ok_or_else(|| ApiError::Server("checkpoint missing seq".into()))?;
+        let tag = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(cp["tag"].as_str().unwrap_or(""))
+            .map_err(|_| ApiError::Server("checkpoint tag not base64url".into()))?;
+        Ok(Some((seq, tag)))
+    }
+
+    /// Publish an updated rollback checkpoint (server keeps the highest).
+    pub async fn put_checkpoint(&mut self, seq: i64, tag: &[u8]) -> Result<(), ApiError> {
+        let payload = json!({ "seq": seq, "tag": b64_bytes(tag) });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.put(format!("{base}/api/v1/vault/checkpoint"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
+    }
+
     // --- session (device) management -------------------------------------
 
     /// List the account's active devices (non-secret metadata).

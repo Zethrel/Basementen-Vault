@@ -173,6 +173,76 @@ self-hosted vault behind TLS/VPN at v1.
 Next from the reviewer's list: the **sync protocol** (rollback/replay/
 conflict), then recovery/device-enrollment and the in-memory-plaintext audit.
 
+## Sync protocol — the reviewer's #2 next milestone (2026-07)
+
+The reviewer asked us to model the sync engine against a malicious or buggy
+server and against concurrent devices, with five concrete questions. We took
+the pass and answer each below.
+
+Already solid (documented, now tested end-to-end): the engine is
+**crypto-agnostic** — it moves opaque ciphertext and never sees a key — so a
+compromised server learns nothing new by observing sync. Deltas are
+revision-based off a per-account monotonic `seq`; tombstones propagate deletes
+and are purged after 30 days; writes use **optimistic concurrency** (a stale
+base revision gets a `409`, never a silent clobber); the resolution rule is
+**server-wins with a conflict-copy** so a losing edit is preserved, never
+destroyed.
+
+New in this pass — **whole-vault rollback is now detected**, closing the one
+malicious-server gap the previous reviews left open (was THREAT_MODEL §A2's
+top post-v1 item). Three layered defenses:
+
+- **Per-device monotonic guard (engine).** The engine records a durable
+  `last_seq` high-water mark and refuses any pull whose `latest_seq` regressed
+  below it (`SyncEngineError::RollbackDetected`), *before* mutating the
+  replica. This also catches the honest-mistake case — restoring an old
+  server backup — not just malice. Test: `server_rollback_is_detected`.
+- **Vault-key-MAC'd cross-device checkpoint.** A device publishes
+  `checkpoint = (seq, HKDF(VaultKey, "sync-checkpoint" ‖ seq))` to the server
+  (invariant I14). Any other device — including a fresh reinstall with no
+  local `last_seq` — fetches it and verifies the tag under the Vault Key. The
+  server cannot forge a checkpoint (no key) and the endpoint only accepts a
+  *higher* `seq`, so it cannot lower an existing anchor either. A tag that
+  fails to verify is treated as server compromise (`CheckpointForged`). Tests:
+  `checkpoint_published_and_verified`, `forged_checkpoint_is_rejected`,
+  `sync_checkpoint_tag_is_deterministic_key_and_seq_bound`.
+- **Alarm-never-silent.** All three conditions surface to the user as a hard
+  "Sync stopped" alert, never a quiet degrade; the replica is left untouched.
+
+The reviewer's five questions, answered:
+
+1. *Can two devices overwrite each other's writes?* No — optimistic
+   concurrency rejects a stale base with `409`; the client re-pulls and
+   re-applies. A true concurrent edit to the same item yields a preserved
+   conflict-copy, not a lost write. Test:
+   `stale_delete_cannot_destroy_a_concurrent_edit`.
+2. *Offline edits then reconnect?* The engine replays local pending ops on top
+   of the pulled server state; each carries its base revision so a conflict is
+   detected rather than silently merged.
+3. *Can the server replay an older vault state?* No — see the three-layer
+   rollback defense above; a regressed `latest_seq` or a checkpoint below the
+   device floor aborts the sync.
+4. *Conflict resolution?* Deterministic server-wins with conflict-copy
+   preservation; the user sees both records and never loses data silently.
+5. *Malicious ordering / silent data loss?* Withholding is caught: an
+   authentic checkpoint for `seq` higher than the data the server actually
+   served triggers `SyncError::Withholding`. Reordering below the floor is a
+   rollback and aborts. Test: `withholding_committed_data_is_detected`.
+
+Layering is deliberate: the checkpoint lives in `desktop-core::rollback::
+synchronize` (it needs the Vault Key) while the engine stays key-free, so the
+transport-agnostic core is unchanged and independently testable.
+
+One narrow residual, tracked (THREAT_MODEL §A2): a *fresh install* that has
+**never** seen this account and whose **first** contact is with a server
+already serving a consistently-rolled-back state has no anchor to compare
+against. Every device that has synced even once is protected. Closing the
+residual fully needs an out-of-band signed checkpoint (e.g. printed with the
+Recovery Kit) — deferred, not rushed into the wire format.
+
+Next from the reviewer's list: recovery/device-enrollment, then the
+in-memory-plaintext audit.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

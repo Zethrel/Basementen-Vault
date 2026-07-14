@@ -463,3 +463,99 @@ async fn accounts_are_isolated() {
     assert_eq!(report.pulled, 0);
     assert!(other_device.0.list().is_empty());
 }
+
+#[tokio::test]
+async fn server_rollback_is_detected() {
+    let account = bootstrap().await;
+    let mut device = (MemoryVault::new(), account.device().await);
+
+    // Establish a high-water mark.
+    device
+        .0
+        .stage(PendingOp::Upsert(account.encrypt("keep", 1, b"v1")));
+    device
+        .0
+        .stage(PendingOp::Upsert(account.encrypt("keep2", 1, b"v2")));
+    sync(&mut device.0, &mut device.1).await.unwrap();
+    let floor = device.0.last_seq();
+    assert!(floor > 0);
+
+    // The server is rewound (malicious rollback, or an old-backup restore):
+    // its global sequence drops below what the device has already applied.
+    sqlx::query("UPDATE accounts SET sync_seq = 0")
+        .execute(&account.state.db)
+        .await
+        .unwrap();
+
+    // The next sync refuses rather than silently discarding newer state.
+    let err = sync(&mut device.0, &mut device.1).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            vault_sync::SyncEngineError::RollbackDetected { local_seq, server_seq }
+                if local_seq == floor && server_seq == 0
+        ),
+        "expected RollbackDetected, got {err:?}"
+    );
+
+    // The local replica is untouched — the items are still there and readable.
+    assert_eq!(device.0.last_seq(), floor, "cursor not moved");
+    let stored = device.0.get("keep").unwrap();
+    assert_eq!(
+        account.decrypt(stored.content.as_ref().unwrap()),
+        b"v1",
+        "local data preserved after a detected rollback"
+    );
+}
+
+#[tokio::test]
+async fn stale_delete_cannot_destroy_a_concurrent_edit() {
+    // The reviewer's "can malicious ordering cause silent data loss?" case: a
+    // device that deletes an item based on a stale revision must NOT wipe an
+    // edit another device made concurrently. The delete loses and is surfaced.
+    let account = bootstrap().await;
+    let mut device_a = (MemoryVault::new(), account.device().await);
+    let mut device_b = (MemoryVault::new(), account.device().await);
+
+    device_a
+        .0
+        .stage(PendingOp::Upsert(account.encrypt("item", 1, b"original")));
+    sync(&mut device_a.0, &mut device_a.1).await.unwrap();
+    sync(&mut device_b.0, &mut device_b.1).await.unwrap();
+
+    // B edits to revision 2 and syncs first.
+    device_b.0.stage(PendingOp::Upsert(account.encrypt(
+        "item",
+        2,
+        b"B's important edit",
+    )));
+    sync(&mut device_b.0, &mut device_b.1).await.unwrap();
+
+    // A, still believing the item is at revision 1, deletes it.
+    device_a.0.stage(PendingOp::Delete {
+        item_id: "item".into(),
+        base_revision: 1,
+    });
+    let report = sync(&mut device_a.0, &mut device_a.1).await.unwrap();
+
+    // The delete lost: the item is NOT deleted, and B's edit stands.
+    let stored = device_a.0.get("item").unwrap();
+    assert!(!stored.deleted, "stale delete must not destroy the item");
+    assert_eq!(
+        account.decrypt(stored.content.as_ref().unwrap()),
+        b"B's important edit"
+    );
+    // The losing delete is surfaced, not silently dropped.
+    assert_eq!(report.conflicts.len(), 1);
+    assert!(matches!(
+        report.conflicts[0].losing_op,
+        PendingOp::Delete { .. }
+    ));
+
+    // Both devices converge on the surviving edit.
+    sync(&mut device_b.0, &mut device_b.1).await.unwrap();
+    assert_eq!(
+        account.decrypt(device_b.0.get("item").unwrap().content.as_ref().unwrap()),
+        b"B's important edit"
+    );
+}

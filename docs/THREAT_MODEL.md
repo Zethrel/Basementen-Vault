@@ -43,15 +43,41 @@ response. What the client validates independently means most such lies are
 | Inject malformed / truncated ciphertext | AEAD tag check fails → `Decrypt` error, never a parse-level exploit (Rust, `forbid(unsafe)`). |
 | Alter an item's `version`/metadata field | Version is bound in AAD and explicitly checked (I12) → rejected. |
 | Learn the Wrapping Key from login traffic | Impossible: auth and encryption are HKDF-independent branches (I2), verified by test. |
-| Serve a **complete old vault snapshot** (whole-vault rollback) | **Not yet prevented** — see residual risk. |
+| Serve a **complete old vault snapshot** (whole-vault rollback) | **Detected** in the common cases (see below); one narrow residual remains. |
 
-**Residual risk:** whole-vault rollback. The server could present an
-internally-consistent older state (all items at older revisions). Per-item
-AAD doesn't catch this because each old item is individually valid. Clients
-detect a *decrease* in the global `seq` they've seen, but a fresh client has
-no baseline. Full mitigation — a signed monotonic checkpoint the client
-verifies is not older than its last-seen — is the top post-v1 item (§Known
-gaps).
+**Whole-vault rollback — now mitigated.** The server could present an
+internally-consistent older state (all items at older revisions); per-item
+AAD can't catch this because each old item is individually valid. Three
+layered defenses now apply (implemented this pass):
+
+1. **Per-device monotonic guard.** Each client stores a durable high-water
+   `last_seq`. The sync engine refuses any pull whose global `latest_seq`
+   regressed below it (`RollbackDetected`), leaving the local replica
+   untouched. This catches *any* rollback below a state this device has
+   already seen — including the realistic accidental case of a self-hoster
+   restoring the server from an old backup. (`vault-sync`;
+   `server_rollback_is_detected`.)
+2. **Vault-key-MAC'd checkpoint (cross-device).** After each sync a client
+   publishes `checkpoint = (seq, HKDF(VaultKey, "sync-checkpoint" ‖ seq))` to
+   the server, which keeps the highest. Any device verifies the tag under the
+   Vault Key — the server can neither forge a checkpoint nor raise it. If the
+   server serves data *below* a checkpoint it presents, that is caught as
+   **withholding committed writes**. (`desktop-core::synchronize`;
+   `checkpoint_published_and_verified`, `forged_checkpoint_is_rejected`,
+   `withholding_committed_data_is_detected`.)
+3. **Alarm, never silent.** A detected rollback/withholding/forgery stops the
+   sync and surfaces a prominent error in the app instead of applying the
+   stale state; the local replica is preserved.
+
+**Residual risk (narrow):** a *fully consistent* rollback presented to a
+device with **no local history and no newer checkpoint to compare against** —
+i.e. a brand-new install syncing for the first time while the server
+simultaneously rewinds both the data and the checkpoint to an earlier real
+state. This is the well-known limit of untrusted storage without a trusted
+monotonic anchor; closing it entirely needs an out-of-band anchor (a second
+device, or persisting the last checkpoint into the Recovery Kit). Every device
+that has synced even once, and every case where any device published a newer
+checkpoint, is protected. Tracked for a future enhancement.
 
 ### A3 — Network attacker (on-path)
 
@@ -169,9 +195,11 @@ attacker-controllable **and** trusted-without-authentication. Tests:
 `recovery_wrap_cannot_be_confused_with_master_wrap`, export tamper proptests.
 
 *Server-managed* sync fields (`seq`, `updated_at`, tombstone flag) are **not**
-end-to-end authenticated — they are the server's bookkeeping. Trusting them is
-exactly the whole-vault rollback gap (§A2), addressed by signed checkpoints
-post-v1.
+end-to-end authenticated — they are the server's bookkeeping. The global `seq`
+in particular is what a rollback manipulates; that is now defended by the
+per-device monotonic guard and the vault-key-MAC'd checkpoint (§A2), which
+authenticate the *sequence* under the Vault Key even though individual
+server fields are not signed.
 
 ## Metadata disclosure
 
@@ -187,7 +215,7 @@ Ordered roughly by priority for post-v1 work.
 
 | Gap | Priority | Status |
 |---|---|---|
-| **Whole-vault rollback by malicious server** | **High** | Accepted for v1. Signed/authenticated monotonic checkpoints (server presents a client-signed `(max_seq, timestamp)` the client verifies is not older than its last-seen) is the intended fix — promoted to the top of the post-v1 list on reviewer recommendation. |
+| Whole-vault rollback by malicious server | **Mitigated** | Implemented: per-device monotonic guard + vault-key-MAC'd cross-device checkpoint + withholding detection (§A2). Only the first-sync-of-a-fresh-install-with-no-anchor case remains (narrow residual, §A2). |
 | **Item-size metadata leak** | High | Ciphertext length ≈ plaintext length. Fix: pad item plaintext to fixed buckets as a versioned `EncryptedItem` v2 (`docs/METADATA.md` rec. 1). |
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |

@@ -108,6 +108,14 @@ pub async fn list_items(
             .fetch_one(&mut *tx)
             .await?;
 
+    // The account's authenticated rollback checkpoint, if any. Opaque to the
+    // server (it can't forge or raise it); the client verifies it.
+    let checkpoint: Option<(Option<i64>, Option<Vec<u8>>)> =
+        sqlx::query_as("SELECT checkpoint_seq, checkpoint_tag FROM accounts WHERE id = ?")
+            .bind(session.account_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
     // A client behind the purge horizon may have missed tombstones that no
     // longer exist; hand it the full current state instead of a delta.
     let full_resync = q.since > 0 && q.since < purged_before_seq;
@@ -130,11 +138,83 @@ pub async fn list_items(
         .filter(|i| !(full_resync && i.deleted))
         .collect();
 
+    use base64::Engine as _;
+    let checkpoint = checkpoint.and_then(|(seq, tag)| match (seq, tag) {
+        (Some(seq), Some(tag)) => Some(json!({
+            "seq": seq,
+            "tag": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(tag),
+        })),
+        _ => None,
+    });
+
     Ok(Json(json!({
         "items": items,
         "latest_seq": latest_seq,
         "full_resync": full_resync,
+        "checkpoint": checkpoint,
     })))
+}
+
+/// GET /api/v1/vault/checkpoint — the account's stored rollback checkpoint.
+pub async fn get_checkpoint(
+    State(state): State<AppState>,
+    session: AuthSession,
+) -> Result<Json<Value>, ApiError> {
+    use base64::Engine as _;
+    let row: Option<(Option<i64>, Option<Vec<u8>>)> =
+        sqlx::query_as("SELECT checkpoint_seq, checkpoint_tag FROM accounts WHERE id = ?")
+            .bind(session.account_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let checkpoint = row.and_then(|(seq, tag)| match (seq, tag) {
+        (Some(seq), Some(tag)) => Some(json!({
+            "seq": seq,
+            "tag": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(tag),
+        })),
+        _ => None,
+    });
+    Ok(Json(json!({ "checkpoint": checkpoint })))
+}
+
+#[derive(Deserialize)]
+pub struct CheckpointRequest {
+    pub seq: i64,
+    /// base64url of the 32-byte vault-key MAC over `seq`.
+    pub tag: String,
+}
+
+/// PUT /api/v1/vault/checkpoint — store an authenticated rollback checkpoint.
+///
+/// The server keeps only the **highest** seq it has been given (checkpoints
+/// are monotonic); it never inspects or forges the tag. A client submits this
+/// after each successful sync so other devices — and its own future
+/// reinstalls — inherit an authenticated freshness floor.
+pub async fn put_checkpoint(
+    State(state): State<AppState>,
+    session: AuthSession,
+    Json(req): Json<CheckpointRequest>,
+) -> Result<Json<Value>, ApiError> {
+    use base64::Engine as _;
+    let tag = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&req.tag)
+        .map_err(|_| ApiError::BadRequest("tag must be base64url".into()))?;
+    if tag.len() != 32 {
+        return Err(ApiError::BadRequest("tag must be 32 bytes".into()));
+    }
+
+    // Monotonic: only advance the checkpoint, never lower it.
+    sqlx::query(
+        "UPDATE accounts SET checkpoint_seq = ?, checkpoint_tag = ?
+         WHERE id = ? AND (checkpoint_seq IS NULL OR checkpoint_seq < ?)",
+    )
+    .bind(req.seq)
+    .bind(&tag)
+    .bind(session.account_id)
+    .bind(req.seq)
+    .execute(&state.db)
+    .await?;
+
+    Ok(Json(json!({ "status": "ok" })))
 }
 
 /// PUT /api/v1/vault/items/{item_id} — create or update one encrypted item.
