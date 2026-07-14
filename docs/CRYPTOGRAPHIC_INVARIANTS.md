@@ -11,6 +11,28 @@ where relevant, adding a guarding test.
 
 ---
 
+## The rules, at a glance
+
+1. The server never possesses enough information to derive or decrypt the
+   Vault Key. *(I1, I10)*
+2. Every encryption operation uses authenticated encryption (AEAD). *(I4)*
+3. Every key has exactly one purpose; HKDF/AAD labels are never reused. *(I5)*
+4. The AuthKey never decrypts data. *(I2)*
+5. The WrappingKey never authenticates and never leaves the client. *(I1, I2)*
+6. Every nonce is unique (fresh from the CSPRNG). *(I3, I6)*
+7. Every ciphertext carries authenticated associated data binding its
+   context, purpose, and version. *(I4, I12)*
+8. Every client validates the crypto version before use. *(I12)*
+9. Password-derived keys use Argon2id with validated, versioned parameters. *(I7)*
+10. Secret material is zeroized and never logged or `Debug`-printed. *(I8, I9)*
+11. Recovery never becomes "prove control of e-mail → receive vault". *(I11)*
+12. The KDF salt is account-lifetime (never rotated). *(I13)*
+
+The numbered invariants below give the enforcement point and guarding test
+for each. (Rules 1–8 map to the reviewer's proposed checklist.)
+
+---
+
 ## The invariants
 
 ### I1 — Encryption keys never leave the client unencrypted
@@ -115,6 +137,32 @@ cooling-off period.
 - **Enforced:** `keys.rs::VaultKey::recovery_verifier`, server
   `routes/recovery.rs`.
 - **Guarded by:** the six `recovery_flows` tests.
+
+### I12 — Every persisted crypto record binds its version/algorithm into AAD
+The format version is authenticated, not just present, so a record of one
+version can never be confused for another (crypto-agility safety). Item AAD
+binds `version + item_id + revision`; wrapped-key AAD binds `purpose +
+version`; export AAD binds `version` (and the KDF parameters implicitly, since
+they key the derivation). Clients also validate the version with an explicit
+equality check before use.
+- **Enforced:** `item.rs::aad_for`, `envelope.rs::wrap_aad`,
+  `export.rs::export_aad`; version checks in `decrypt_item`/`unwrap`/
+  `decrypt_export`.
+- **Guarded by:** `crypto_flows::item_binds_version_in_aad`,
+  `recovery_wrap_cannot_be_confused_with_master_wrap`, and the export
+  round-trip/tamper proptests.
+
+### I13 — The KDF salt is account-lifetime
+A random salt is generated once at registration and **never rotated** — not
+on password change, not on recovery. It is not secret, and the derived key
+already changes when the password changes, so rotating it would only add
+state that must stay synchronized. `recover_and_rekey` / `change_password`
+take the existing salt; `recovery/data` returns it.
+- **Enforced:** `account.rs` (only `register` calls `generate_salt`); server
+  `recovery/complete` stores the client-supplied (unchanged) salt.
+- **Guarded by:** `crypto_flows::{full_recovery_flow_preserves_vault_data,
+  change_password_keeps_vault_key_and_rotates_credentials}` assert the salt
+  is preserved; `recovery_flows` asserts `recovery/data` returns the original.
 
 ---
 

@@ -178,12 +178,15 @@ fn encrypt_with_params(plaintext: &[u8], passphrase: &str, params: KdfParams) ->
         .unwrap();
     let cipher = XChaCha20Poly1305::new((&key).into());
     let nonce = XChaCha20Poly1305::generate_nonce(&mut ROsRng);
+    // Must match `export::export_aad(1)` = context || version_le.
+    let mut aad = b"basementen-vault/export".to_vec();
+    aad.extend_from_slice(&1u16.to_le_bytes());
     let ciphertext = cipher
         .encrypt(
             &nonce,
             Payload {
                 msg: plaintext,
-                aad: b"basementen-vault/v1/export",
+                aad: &aad,
             },
         )
         .unwrap();

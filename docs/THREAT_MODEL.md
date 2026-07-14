@@ -29,17 +29,29 @@ minimum; strengthen with a wordlist check (backlog).
 
 ### A2 — Malicious or compromised server (active)
 
-Everything in A1, plus: can serve stale data (freshness is not
-cryptographically guaranteed — accepted for v1), refuse service, or lie in
-protocol responses. Cannot swap item ciphertexts between items or roll an
-item back to an older revision without the client's AEAD check failing
-(item ID + revision are bound as associated data). Cannot learn the
-WrappingKey from login traffic: the auth branch of the hierarchy is
-HKDF-independent, verified by test.
+Everything in A1, plus it can refuse service or lie in any protocol
+response. What the client validates independently means most such lies are
+**fail-safe (denial of service at worst), never key disclosure**:
 
-**Residual risk:** a malicious server could serve a *complete* old snapshot
-(rollback of the whole vault). Detectable by clients comparing their last
-seq; full mitigation (signed checkpoints) is post-v1.
+| Malicious server action | Outcome for the client |
+|---|---|
+| Substitute / downgrade KDF parameters (prelogin, login) | The client rejects any params below the OWASP floor before deriving (I7). Params above the floor but *different* from registration derive a different Master Key → the Wrapping Key differs → unwrapping the Vault Key **fails**. DoS, never disclosure or a genuine cost downgrade — the vault was wrapped under the real-param key. |
+| Substitute the KDF salt | Same as above: different salt → different key → unwrap fails. DoS. |
+| Replay an old `master_wrapped_vault_key` | Harmless: password changes re-wrap the *same* Vault Key, so any historical wrap decrypts to the same VK. |
+| Replay / inject a foreign wrapped key | AEAD + purpose+version AAD binding (I4, I12) → decryption fails. |
+| Swap item ciphertexts between items, or roll one item back | Item AAD binds `item_id + revision` (I4) → decryption fails. |
+| Inject malformed / truncated ciphertext | AEAD tag check fails → `Decrypt` error, never a parse-level exploit (Rust, `forbid(unsafe)`). |
+| Alter an item's `version`/metadata field | Version is bound in AAD and explicitly checked (I12) → rejected. |
+| Learn the Wrapping Key from login traffic | Impossible: auth and encryption are HKDF-independent branches (I2), verified by test. |
+| Serve a **complete old vault snapshot** (whole-vault rollback) | **Not yet prevented** — see residual risk. |
+
+**Residual risk:** whole-vault rollback. The server could present an
+internally-consistent older state (all items at older revisions). Per-item
+AAD doesn't catch this because each old item is individually valid. Clients
+detect a *decrease* in the global `seq` they've seen, but a fresh client has
+no baseline. Full mitigation — a signed monotonic checkpoint the client
+verifies is not older than its last-seen — is the top post-v1 item (§Known
+gaps).
 
 ### A3 — Network attacker (on-path)
 
@@ -104,6 +116,29 @@ window; it does not close it against a live attacker on the device.
 Crypto is confined to audited RustCrypto crates; `unsafe_code = "forbid"`
 workspace-wide; RustSec `cargo audit` in CI; `Cargo.lock` committed; no
 frontend package dependencies at all (plain JS, CSP `default-src 'self'`).
+
+## Metadata integrity — what is authenticated
+
+Distinct from disclosure (below): which fields are covered by AEAD associated
+data, so tampering is detected. As of the version-binding change (invariant
+I12):
+
+| Record | Authenticated (AEAD tag + AAD) | Not in AAD but safe because… |
+|---|---|---|
+| **Item** | ciphertext, nonce (it *is* the AEAD nonce), `item_id`, `revision`, `version` | — everything relevant is bound |
+| **Wrapped key** | ciphertext, nonce, `purpose` (master/recovery), `version` | — |
+| **Export** | ciphertext, nonce, `version`; KDF params implicitly (they key derivation) | — |
+
+`nonce` is not "in the AAD" for any record, but it is the AEAD nonce itself,
+so altering it changes the keystream and fails the tag. No field is both
+attacker-controllable **and** trusted-without-authentication. Tests:
+`item_binds_id_and_revision`, `item_binds_version_in_aad`,
+`recovery_wrap_cannot_be_confused_with_master_wrap`, export tamper proptests.
+
+*Server-managed* sync fields (`seq`, `updated_at`, tombstone flag) are **not**
+end-to-end authenticated — they are the server's bookkeeping. Trusting them is
+exactly the whole-vault rollback gap (§A2), addressed by signed checkpoints
+post-v1.
 
 ## Metadata disclosure
 

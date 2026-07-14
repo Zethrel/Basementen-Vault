@@ -345,10 +345,15 @@ async fn api_client_recovery_lifecycle() {
     // Recover with the kit, under a new password.
     let data = api.recovery_data(&token).await.unwrap();
     assert!(data.supports_data_recovery);
+    assert_eq!(
+        data.kdf_salt, reg.bundle.kdf_salt,
+        "salt is account-lifetime"
+    );
     let new_reg = vault_core::account::recover_and_rekey(
         &reg.recovery_code,
         &data.recovery_wrapped_vault_key,
         "password after recovery",
+        &data.kdf_salt,
         vault_core::KdfParams::mobile_floor(),
     )
     .unwrap();

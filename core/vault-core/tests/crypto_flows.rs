@@ -222,6 +222,17 @@ fn item_binds_id_and_revision() {
     assert!(vk.decrypt_item(&rolled_back).is_err());
 }
 
+#[test]
+fn item_binds_version_in_aad() {
+    // The record version is authenticated: flipping it must fail decryption,
+    // not silently succeed or trigger a different code path.
+    let vk = VaultKey::generate();
+    let item = vk.encrypt_item("item-1", 1, b"secret").unwrap();
+    let mut wrong_version = item.clone();
+    wrong_version.version = 2;
+    assert!(vk.decrypt_item(&wrong_version).is_err());
+}
+
 // ---------------------------------------------------------------------------
 // Recovery
 
@@ -266,6 +277,7 @@ fn full_recovery_flow_preserves_vault_data() {
         &reg.recovery_code,
         &reg.bundle.recovery_wrapped_vault_key,
         "brand new master password",
+        &reg.bundle.kdf_salt,
         params(),
     )
     .unwrap();
@@ -278,9 +290,9 @@ fn full_recovery_flow_preserves_vault_data() {
         recovered.bundle.auth_credential, reg.bundle.auth_credential,
         "new password must produce a new auth credential"
     );
-    assert_ne!(
+    assert_eq!(
         recovered.bundle.kdf_salt, reg.bundle.kdf_salt,
-        "recovery issues a fresh salt"
+        "the salt is account-lifetime and not rotated on recovery"
     );
     assert_ne!(
         *recovered.recovery_code, *reg.recovery_code,
@@ -318,10 +330,19 @@ fn change_password_keeps_vault_key_and_rotates_credentials() {
         .encrypt_item("item-1", 1, b"still here")
         .unwrap();
 
-    let changed = account::change_password(&reg.secrets, "new password 42", params()).unwrap();
+    let changed = account::change_password(
+        &reg.secrets,
+        "new password 42",
+        &reg.bundle.kdf_salt,
+        params(),
+    )
+    .unwrap();
 
     assert_ne!(changed.bundle.auth_credential, reg.bundle.auth_credential);
-    assert_ne!(changed.bundle.kdf_salt, reg.bundle.kdf_salt, "fresh salt");
+    assert_eq!(
+        changed.bundle.kdf_salt, reg.bundle.kdf_salt,
+        "the salt is account-lifetime and not rotated on password change"
+    );
 
     let unlocked = unlock("new password 42", &changed).unwrap();
     assert_eq!(
@@ -334,6 +355,7 @@ fn change_password_keeps_vault_key_and_rotates_credentials() {
         &changed.recovery_code,
         &changed.bundle.recovery_wrapped_vault_key,
         "yet another password",
+        &changed.bundle.kdf_salt,
         params(),
     )
     .unwrap();

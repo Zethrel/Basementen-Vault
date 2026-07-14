@@ -217,6 +217,8 @@ pub async fn data(
     Ok(Json(json!({
         "email": account.email,
         "kdf_params": parse(&account.kdf_params),
+        // The account's existing salt: recovery reuses it (account-lifetime).
+        "kdf_salt": crate::routes::accounts::encode_salt(&account.kdf_salt),
         "recovery_wrapped_vault_key": parse(&account.recovery_wrapped_vault_key),
         "supports_data_recovery": has_verifier.is_some(),
     })))

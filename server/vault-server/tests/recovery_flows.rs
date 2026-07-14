@@ -228,10 +228,17 @@ async fn full_recovery_with_kit_preserves_vault() {
     let wrapped: vault_core::WrappedKey =
         serde_json::from_value(data["recovery_wrapped_vault_key"].clone()).unwrap();
 
+    // recovery/data returns the account's existing salt; recovery reuses it.
+    let salt = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(data["kdf_salt"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(salt, reg.bundle.kdf_salt, "salt is account-lifetime");
+
     let new_reg = vault_core::account::recover_and_rekey(
         &reg.recovery_code,
         &wrapped,
         NEW_PASSWORD,
+        &salt,
         vault_core::KdfParams::mobile_floor(),
     )
     .unwrap();

@@ -55,6 +55,11 @@ pub struct Registration {
     pub recovery_code: Zeroizing<String>,
 }
 
+fn to_salt(salt: &[u8]) -> Result<[u8; SALT_LEN], CryptoError> {
+    salt.try_into()
+        .map_err(|_| CryptoError::InvalidKdfParams(format!("salt must be {SALT_LEN} bytes")))
+}
+
 /// Assemble a bundle + secrets from a freshly derived hierarchy over an
 /// existing Vault Key (shared by register / recover / change-password).
 fn build_registration(
@@ -127,32 +132,42 @@ pub fn unlock(
 ///
 /// Returns a fresh [`Registration`] whose bundle the server should store in
 /// place of the old one (same Vault Key, so all existing items remain
-/// readable; new auth credential, new wrapped copies, new recovery code, and
-/// a fresh salt — the used kit is considered spent).
+/// readable; new auth credential, new wrapped copies, new recovery code —
+/// the used kit is considered spent).
+///
+/// The `salt` is the account's existing KDF salt (from `recovery/data`).
+/// The salt is **not** rotated: it is not secret, and the derived key already
+/// changes because the password changed. Keeping it account-lifetime removes
+/// a piece of state that would otherwise have to stay synchronized.
 pub fn recover_and_rekey(
     recovery_code: &str,
     recovery_wrapped_vault_key: &WrappedKey,
     new_password: &str,
+    salt: &[u8],
     params: KdfParams,
 ) -> Result<Registration, CryptoError> {
     let recovery_key = RecoveryKey::from_recovery_code(recovery_code)?;
     let vault_key = recovery_key.unwrap_vault_key(recovery_wrapped_vault_key)?;
-    build_registration(params, generate_salt(), new_password, vault_key)
+    build_registration(params, to_salt(salt)?, new_password, vault_key)
 }
 
 /// Change the master password: re-derive the hierarchy under the new password
-/// (with a fresh salt) and re-wrap the existing Vault Key. Vault items are
-/// untouched (envelope encryption is what makes this cheap). A fresh Recovery
-/// Kit is issued — the caller must show the new recovery code to the user, as
-/// the old kit stops working the moment the server stores the new bundle.
+/// and re-wrap the existing Vault Key. Vault items are untouched (envelope
+/// encryption is what makes this cheap). A fresh Recovery Kit is issued — the
+/// caller must show the new recovery code to the user, as the old kit stops
+/// working the moment the server stores the new bundle.
+///
+/// The account's existing `salt` is reused (see [`recover_and_rekey`] on why
+/// the salt is account-lifetime).
 pub fn change_password(
     secrets: &AccountSecrets,
     new_password: &str,
+    salt: &[u8],
     params: KdfParams,
 ) -> Result<Registration, CryptoError> {
     build_registration(
         params,
-        generate_salt(),
+        to_salt(salt)?,
         new_password,
         secrets.vault_key.clone(),
     )

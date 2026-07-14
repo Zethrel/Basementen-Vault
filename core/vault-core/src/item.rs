@@ -27,17 +27,22 @@ pub struct EncryptedItem {
     pub ciphertext: Vec<u8>,
 }
 
-fn aad_for(item_id: &str, revision: u64) -> Vec<u8> {
-    // Length-prefix the variable-length field so (id="a", rev bytes) can never
-    // collide with a different (id, rev) pair.
+fn aad_for(version: u16, item_id: &str, revision: u64) -> Vec<u8> {
+    // Bind the record version (crypto-agility: a v2 item can never be passed
+    // off as v1) plus the item ID and revision. Length-prefix the
+    // variable-length field so (id="a", rev bytes) can never collide with a
+    // different (id, rev) pair.
     let id = item_id.as_bytes();
-    let mut aad = Vec::with_capacity(AAD_CONTEXT.len() + 8 + id.len() + 8);
+    let mut aad = Vec::with_capacity(AAD_CONTEXT.len() + 2 + 8 + id.len() + 8);
     aad.extend_from_slice(AAD_CONTEXT);
+    aad.extend_from_slice(&version.to_le_bytes());
     aad.extend_from_slice(&(id.len() as u64).to_le_bytes());
     aad.extend_from_slice(id);
     aad.extend_from_slice(&revision.to_le_bytes());
     aad
 }
+
+const ITEM_VERSION: u16 = 1;
 
 impl VaultKey {
     /// Encrypt one vault item's serialized plaintext.
@@ -54,12 +59,12 @@ impl VaultKey {
                 &nonce,
                 Payload {
                     msg: plaintext,
-                    aad: &aad_for(item_id, revision),
+                    aad: &aad_for(ITEM_VERSION, item_id, revision),
                 },
             )
             .map_err(|_| CryptoError::Encrypt)?;
         Ok(EncryptedItem {
-            version: 1,
+            version: ITEM_VERSION,
             item_id: item_id.to_owned(),
             revision,
             nonce: nonce.into(),
@@ -81,7 +86,7 @@ impl VaultKey {
                 &nonce,
                 Payload {
                     msg: item.ciphertext.as_slice(),
-                    aad: &aad_for(&item.item_id, item.revision),
+                    aad: &aad_for(item.version, &item.item_id, item.revision),
                 },
             )
             .map_err(|_| CryptoError::Decrypt)

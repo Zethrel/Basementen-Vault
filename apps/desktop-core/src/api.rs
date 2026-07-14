@@ -51,6 +51,8 @@ pub struct PreloginInfo {
 pub struct RecoveryData {
     pub email: String,
     pub kdf_params: KdfParams,
+    /// The account's existing KDF salt; recovery reuses it (account-lifetime).
+    pub kdf_salt: Vec<u8>,
     pub recovery_wrapped_vault_key: WrappedKey,
     pub supports_data_recovery: bool,
 }
@@ -297,6 +299,7 @@ impl ApiClient {
                 .to_string(),
             kdf_params: serde_json::from_value(body["kdf_params"].clone())
                 .map_err(|e| ApiError::Server(e.to_string()))?,
+            kdf_salt: decode_salt(&body)?,
             recovery_wrapped_vault_key: serde_json::from_value(
                 body["recovery_wrapped_vault_key"].clone(),
             )

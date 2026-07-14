@@ -457,6 +457,7 @@ async fn recover_complete(
                 &code,
                 &data.recovery_wrapped_vault_key,
                 &new_password,
+                &data.kdf_salt,
                 vault_core::KdfParams::desktop(),
             )
             .map_err(|_| "recovery failed — check the Recovery Kit code for typos".to_string())?;

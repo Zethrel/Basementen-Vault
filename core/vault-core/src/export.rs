@@ -18,7 +18,18 @@ use crate::kdf::KdfParams;
 
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
-const AAD: &[u8] = b"basementen-vault/v1/export";
+const AAD_CONTEXT: &[u8] = b"basementen-vault/export";
+const EXPORT_VERSION: u16 = 1;
+
+/// Bind the export format version into the AEAD associated data. The KDF
+/// parameters are *implicitly* authenticated: they key the derivation, so
+/// altering them yields a different key and decryption fails.
+fn export_aad(version: u16) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(AAD_CONTEXT.len() + 2);
+    aad.extend_from_slice(AAD_CONTEXT);
+    aad.extend_from_slice(&version.to_le_bytes());
+    aad
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExportEnvelope {
@@ -70,14 +81,14 @@ pub fn encrypt_export(plaintext: &[u8], passphrase: &str) -> Result<ExportEnvelo
             &nonce,
             Payload {
                 msg: plaintext,
-                aad: AAD,
+                aad: &export_aad(EXPORT_VERSION),
             },
         )
         .map_err(|_| CryptoError::Encrypt)?;
 
     Ok(ExportEnvelope {
         format: "basementen-vault-export".into(),
-        version: 1,
+        version: EXPORT_VERSION,
         kdf_params: params,
         salt,
         nonce: nonce.into(),
@@ -100,7 +111,7 @@ pub fn decrypt_export(
             &XNonce::from(envelope.nonce),
             Payload {
                 msg: envelope.ciphertext.as_slice(),
-                aad: AAD,
+                aad: &export_aad(envelope.version),
             },
         )
         .map_err(|_| CryptoError::Decrypt)?;

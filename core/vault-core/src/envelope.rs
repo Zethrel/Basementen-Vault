@@ -37,6 +37,17 @@ pub struct WrappedKey {
     pub ciphertext: Vec<u8>,
 }
 
+const WRAP_VERSION: u16 = 1;
+
+/// Bind the wrap version + purpose into the AEAD associated data, so a blob
+/// can be confused across neither purpose nor future format versions.
+fn wrap_aad(version: u16, purpose: WrapPurpose) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(purpose.aad().len() + 2);
+    aad.extend_from_slice(purpose.aad());
+    aad.extend_from_slice(&version.to_le_bytes());
+    aad
+}
+
 fn wrap(key_bytes: &[u8; KEY_LEN], vk: &VaultKey, purpose: WrapPurpose) -> WrappedKey {
     let cipher = XChaCha20Poly1305::new(key_bytes.into());
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
@@ -45,12 +56,12 @@ fn wrap(key_bytes: &[u8; KEY_LEN], vk: &VaultKey, purpose: WrapPurpose) -> Wrapp
             &nonce,
             Payload {
                 msg: vk.as_bytes(),
-                aad: purpose.aad(),
+                aad: &wrap_aad(WRAP_VERSION, purpose),
             },
         )
         .expect("XChaCha20-Poly1305 encryption of 32 bytes cannot fail");
     WrappedKey {
-        version: 1,
+        version: WRAP_VERSION,
         purpose,
         nonce: nonce.into(),
         ciphertext,
@@ -75,7 +86,7 @@ fn unwrap(
             &nonce,
             Payload {
                 msg: wrapped.ciphertext.as_slice(),
-                aad: expected.aad(),
+                aad: &wrap_aad(wrapped.version, expected),
             },
         )
         .map_err(|_| CryptoError::Decrypt)?;

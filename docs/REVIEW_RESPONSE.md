@@ -69,8 +69,8 @@ What shipped (this commit):
 - Client KDF salt is now a **random 128-bit per-account value**
   (`kdf::generate_salt`); the e-mail no longer enters derivation at all.
 - The salt is stored server-side (`accounts.kdf_salt`), returned by
-  `prelogin`/`login`, cached in `AccountMeta` for offline unlock, and rotated
-  on recovery / password change.
+  `prelogin`/`login`, and cached in `AccountMeta` for offline unlock. (The
+  third review then made it account-lifetime — never rotated; see below.)
 - **Anti-enumeration preserved:** `prelogin` returns a stable, unpredictable
   dummy salt (`HMAC(server_secret, email)`) for unknown accounts, so the
   response is indistinguishable from a real one. New test:
@@ -87,6 +87,48 @@ that would catch any salt-threading inconsistency.
 One residual, tracked: the `enumeration_secret` is per-process (like the
 existing `dummy_hash`); persisting it would also hide account existence across
 a server restart. Noted in THREAT_MODEL.
+
+## Third review — salt lifetime, and the "edges" (2026-07)
+
+The reviewer endorsed the random-salt change and raised one concrete item
+plus a list of areas to scrutinize next.
+
+**Concrete change — don't rotate the salt on password change (done).** They
+were right: rotating adds synchronized state and a half-failed-operation path
+for zero cryptographic benefit (the password already changed the key). We
+made the salt **account-lifetime**: generated once at registration, never
+rotated — including through recovery. `recover_and_rekey`/`change_password`
+now take the existing salt; `recovery/data` returns it; invariant I13 and
+tests assert preservation.
+
+**Metadata integrity (their #5) — hardened + documented.** We bound the
+record/format `version` into the AEAD associated data for items, wrapped
+keys, and exports (invariant I12), so *all* persisted metadata is now
+authenticated, not just the ciphertext. THREAT_MODEL now has a precise
+"what is authenticated" table.
+
+**Server-compromise model (their #4) — documented as a matrix.** THREAT_MODEL
+§A2 now enumerates each malicious-server action (param/salt substitution,
+wrapped-key replay, item swap/rollback, malformed ciphertext, metadata
+alteration) and shows the client-side check that makes it fail-safe (DoS, not
+disclosure) — with the one genuine exception, whole-vault rollback, called
+out as the top post-v1 item.
+
+**Recovery (their #3) — the answer is "no".** Recovery can *never* become
+"prove control of e-mail → receive vault": data-preserving recovery requires
+the Recovery-Kit verifier (I11); e-mail alone yields only an explicit,
+cooling-off-gated wipe. Unchanged, restated here for the record.
+
+**CRYPTOGRAPHIC_INVARIANTS.md** now opens with a 12-rule at-a-glance list; the
+reviewer's proposed 8 map to rules 1–8.
+
+**Areas deferred to dedicated review (agreed milestone order):** session
+layer, sync protocol + rollback/replay, device enrollment, and a full
+in-memory-plaintext audit. These match the reviewer's proposed pre-audit
+milestones; the browser extension is intentionally not designed yet (it
+would change the threat model and we'd rather model it when it's real). No
+code exists for these beyond what's already documented; we'll take them one
+at a time.
 
 ## Standing invitation
 
