@@ -243,6 +243,78 @@ Recovery Kit) — deferred, not rushed into the wire format.
 Next from the reviewer's list: recovery/device-enrollment, then the
 in-memory-plaintext audit.
 
+## Recovery / device-enrollment — the reviewer's #3 milestone (2026-07)
+
+We reviewed the recovery and device-enrollment surface. The core crypto was
+already solid (the six `recovery_flows` tests: Recovery-Kit-preserves-data,
+cooling-off, cancel, verifier enforcement, wipe-reset, backup-email lifecycle;
+verifier is an HKDF branch of the Vault Key stored only as SHA-256, so e-mail
+alone can never data-preservingly recover). The gaps were in the *enrollment
+and second-factor* edges, which we hardened:
+
+- **TOTP one-time use (RFC 6238 §5.2).** Codes were previously replayable
+  within their ±1-step window. The server now records the last consumed
+  time-step and refuses any non-newer code, across login and every sensitive-
+  action confirmation. Enforcement starts at first login (not enrollment) so
+  the "activate then sign in" flow stays natural.
+- **New-device sign-in notification.** Enrollment is just a login, so we added
+  the missing detection control: a session opened for a not-already-active
+  device label alerts the owner. This is the answer to "attacker has my
+  password and a second factor" — they can't sign in silently.
+- **`device_name` hardening.** It was unbounded client input echoed into the
+  device list; now sanitized (control chars stripped, capped at 64 chars).
+- **Recovery-code replenishment.** Ten single-use codes could be exhausted
+  with no path back except full account recovery. Added `GET /mfa/status`
+  (remaining count) and `POST /mfa/recovery-codes/regenerate` (fresh password
+  + current TOTP).
+
+Four new tests; full suite green. Documented in THREAT_MODEL §A4c (these are
+auth-layer controls — recorded with the session/second-factor threats rather
+than as crypto invariants).
+
+## Documentation review — reconciliation pass (2026-07)
+
+A documentation reviewer read all eight docs and flagged inconsistencies and
+ambiguities. Every point is now fixed or answered in-place:
+
+- **SQLite vs PostgreSQL.** The as-built server uses **SQLite**; the plan's
+  tech-choice table still listed PostgreSQL (and PASETO/JWT) as the target.
+  Corrected to the shipped choices with the rationale, noting Postgres as an
+  optional future backend (IMPLEMENTATION_PLAN §7).
+- **`device_name` default contradiction.** METADATA said both "defaults to
+  empty" and "app sends the OS hostname." Reconciled: the app sends the
+  hostname (fallback `"desktop"`); the field is optional *at the protocol
+  level* (a client may send empty); the server sanitizes but never invents one
+  (METADATA). MOBILE.md doesn't actually assert a default — no change needed
+  there.
+- **Recovery Kit timing.** Clarified that a fresh kit is issued on **both**
+  password change and full recovery (both rebuild the bundle); the verifier
+  value itself is stable because the Vault Key is (CRYPTOGRAPHIC_INVARIANTS
+  I11).
+- **Two (three) distinct salts.** Added a table separating the client KDF
+  salt, the server auth-hash salt, and the export salt — where each lives and
+  what it defends (CRYPTOGRAPHIC_INVARIANTS §Salt).
+- **Export envelope spec.** Added the full v1 field-by-field format
+  (CRYPTOGRAPHIC_INVARIANTS §Export file format).
+- **Prelogin / cache lifecycle.** Documented what the `AccountMeta` cache
+  holds, when it refreshes, and why an account-lifetime salt means a stale
+  cache is never wrong (CRYPTOGRAPHIC_INVARIANTS §Salt).
+- **Operator SQL vs "no admin override."** Reconciled in RUNBOOK: raw SQL is a
+  self-host operator's break-glass tool that touches only *availability*; it
+  can never reach plaintext, because the server holds no keys. "No admin
+  override" means no path to plaintext, not no operational control.
+- **Conflict-copy granularity (Q).** Corrected: resolution is **whole-item**
+  server-wins-with-conflict-copy, not field-group — the zero-knowledge engine
+  sees only opaque ciphertext, so field-level merge is impossible by
+  construction (IMPLEMENTATION_PLAN §6).
+- **Checkpoint ↔ monotonic-guard order (Q).** Documented the exact five-step
+  sequence within one sync cycle and why there are two guards against
+  different anchors (THREAT_MODEL §A2).
+- **`enumeration_secret` restart signal (Q).** Added an exploitability
+  analysis: it is a probabilistic *existence* hint gated on observing a server
+  restart and re-querying across it, never a disclosure or auth path;
+  persisting the secret closes even that (THREAT_MODEL gaps).
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

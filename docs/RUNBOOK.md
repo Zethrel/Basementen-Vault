@@ -71,6 +71,19 @@ Normal path: app → "Recover your vault" (needs e-mail + Recovery Kit).
 Admin shortcut does not exist by design — the server cannot decrypt or
 bypass. Without kit: wipe-reset only.
 
+> **Operator SQL vs. "no admin override" — how these reconcile.** The raw
+> `sqlite3` commands in this runbook are break-glass tools for the person who
+> *owns the server*, and every one of them touches only **availability**:
+> revoking sessions, locking accounts, deleting rows. None can read or decrypt
+> a vault, recover a master password, forge a login credential, or unwrap the
+> Vault Key — the server holds no key material, so there is nothing for SQL to
+> reach (I1, I10). "No admin override" means exactly *no path to plaintext*,
+> not "no operational control." An operator (or an attacker who seizes the DB)
+> can deny service or destroy ciphertext; neither yields a readable secret.
+> This is why the incident-response steps above are safe to hand to an operator
+> and why database confidentiality, while still worth protecting, is not what
+> stands between an attacker and your passwords.
+
 **Recovery abuse suspected** (user reports unexpected recovery mail)
 
 The mail's cancel link kills the request. Check

@@ -69,6 +69,28 @@ layered defenses now apply (implemented this pass):
    sync and surfaces a prominent error in the app instead of applying the
    stale state; the local replica is preserved.
 
+**How the checkpoint and the monotonic guard interact (order within one sync).**
+`desktop-core::rollback::synchronize` sequences the two so a forgery or
+rollback is caught *before* any local state is mutated:
+
+1. Fetch the server's checkpoint and **verify its MAC** under the Vault Key.
+   A bad tag → `CheckpointForged`, abort (nothing touched).
+2. If the authentic checkpoint's `seq` is **below** this device's durable
+   `last_seq`, that is a rollback → abort before pulling.
+3. Run the engine sync; the engine's **own** monotonic guard independently
+   refuses a pull whose `latest_seq` regressed below `last_seq`. (Two guards,
+   different anchors: step 2 compares against the cross-device *checkpoint*,
+   the engine compares against this device's *own high-water mark*. Either
+   firing aborts.)
+4. After applying, check the served `latest_seq` against the verified
+   checkpoint: served < checkpoint → **withholding**, abort.
+5. Only if all checks pass, publish an updated checkpoint at the new
+   high-water mark (the server keeps the max, so it can never lower it).
+
+The layering is deliberate: the engine guard needs no key and protects even a
+key-less transport test, while the checkpoint adds the cross-device / fresh-
+reinstall dimension the per-device guard alone can't see.
+
 **Residual risk (narrow):** a *fully consistent* rollback presented to a
 device with **no local history and no newer checkpoint to compare against** —
 i.e. a brand-new install syncing for the first time while the server
@@ -126,6 +148,41 @@ binding (DPoP / mTLS) would close the bearer-replay window entirely but is a
 large feature; for a self-hosted vault behind TLS/VPN the short TTL +
 rotation + revocation is the accepted v1 posture. Tracked as a possible
 enhancement.
+
+### A4c — Second factor and device enrollment
+
+A new device is enrolled by an ordinary login (e-mail + master password →
+AuthKey, plus TOTP when enrolled) — there is no separate device-approval step,
+so the second factor and the detection controls below carry the weight:
+
+- **TOTP is one-time-use.** The server records the last consumed 30-second
+  time-step and rejects any code whose step is not strictly newer (RFC 6238
+  §5.2). A code phished or sniffed once cannot be replayed within its validity
+  window, nor reused across a login and a follow-up sensitive action.
+  (`routes/mfa::consume_totp`; `api_flows::totp_code_cannot_be_replayed`.)
+- **New-device sign-in alert.** A login that opens a session for a device
+  label not already active e-mails the account owner, so an attacker who has
+  the password *and* a second factor still can't sign in silently. (Primary
+  address only; concurrent same-named devices don't re-alarm.
+  `api_flows::new_device_login_notifies_owner_once_per_device`.)
+- **Recovery codes are single-use and replenishable.** Ten one-time codes are
+  issued on TOTP activation; each works exactly once. `GET /mfa/status` reports
+  how many remain and `POST /mfa/recovery-codes/regenerate` (fresh password +
+  current TOTP) mints a fresh set, so exhaustion doesn't force the heavier
+  account-recovery path. (`api_flows::recovery_codes_status_and_regeneration`.)
+- **Sensitive settings re-authenticate.** Enrolling/disabling TOTP,
+  regenerating recovery codes, and changing the backup e-mail each require a
+  fresh master-password confirmation (and a current TOTP when enrolled) — a
+  stolen session token alone cannot weaken MFA.
+- **Device labels are untrusted input.** `device_name` is client-supplied;
+  the server strips control characters and caps it at 64 chars before storing,
+  and the app renders it as text (never HTML), so it can neither bloat the
+  table nor inject into the device list.
+
+**Residual risk:** a phisher who relays the password *and* a live TOTP code in
+real time can complete one login — but it triggers the new-device alert, and
+the one-time-use rule denies any second use of that code. Closing the relay
+vector entirely needs origin-bound WebAuthn (deferred; see gaps).
 
 ### A5 — Attacker with the victim's e-mail inbox
 
@@ -220,8 +277,37 @@ Ordered roughly by priority for post-v1 work.
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
 | Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |
-| `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart (a weak cross-restart enumeration signal). Persisting the secret closes it; deferred, consistent with the existing per-process `dummy_hash`. |
+| `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart. See the exploitability analysis below — it is not practically exploitable; persisting the secret closes even the theoretical signal. Deferred, consistent with the existing per-process `dummy_hash`. |
 | Bearer access tokens are replayable for ≤15 min | Low | Sender-constrained tokens (DPoP proof-of-possession or mTLS) would eliminate the replay window (§A4b). Deferred; short TTL + rotation + revocation is the v1 posture. |
 | Mobile Argon2 parameters possibly conservative | Low | Floor is `m=19 MiB, t=2, p=1`; desktop `m=64 MiB, t=3, p=4`. Benchmark real unlock times per device class and raise toward `m=64–128 MiB` where UX allows — reviewer note. Parameters are per-account and versioned, so raising them later is a normal password-change (`RUNBOOK.md` §KDF migration). |
 | E-mail inbox compromise enables wipe-after-72h | Accepted | By design (§A5): disclosure is worse than denial. |
 | External security audit | **Blocker** | **Required before real-world use** — see RUNBOOK. |
+
+### Is the per-process `enumeration_secret` restart signal exploitable?
+
+In practice, no. `prelogin` returns, for an unknown e-mail, a dummy salt
+`HMAC(enumeration_secret, email)` that is stable within a server run and
+indistinguishable from a real account's stored salt. On restart the secret is
+regenerated, so an *unknown* e-mail's dummy salt changes, whereas a *real*
+account's salt (in the DB) stays fixed. An attacker who records salts before
+and after a restart could therefore flag "salt changed across restart ⇒
+probably unregistered."
+
+Why this is not a practical oracle:
+
+- The attacker must **observe a server restart** and re-query the *same*
+  addresses across it. Restarts are infrequent and not attacker-triggerable.
+- A single observation leaks nothing (both real and dummy salts look random
+  and stable). The signal exists only in the *diff* across a restart.
+- It reveals only **existence**, never any secret, credential, or vault
+  content — the same category of leak the whole anti-enumeration design already
+  treats as low severity — and registration/recovery/login are all
+  independently anti-enumerated and rate-limited, so confirmed existence buys
+  an attacker no further step.
+- A legitimate account whose salt is fixed is the *baseline*; the noise floor
+  of normal salt stability makes the inference probabilistic, not certain.
+
+Closing it fully is a one-line change — persist `enumeration_secret` (and
+`dummy_hash`) across restarts, e.g. in a server keyfile — and is tracked above.
+It is deferred only because the exposure is a probabilistic existence hint
+gated on observing a restart, not a usable authentication or disclosure path.

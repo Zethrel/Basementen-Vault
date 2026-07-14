@@ -139,6 +139,16 @@ cooling-off period.
   `routes/recovery.rs`.
 - **Guarded by:** the six `recovery_flows` tests.
 
+**Recovery Kit lifetime.** A fresh Recovery Kit (new `RecoveryKey`, new printed
+code) is issued **any time the account bundle is rebuilt** — both on `recover_
+and_rekey` *and* on `change_password` (both call `build_registration`, which
+generates a new `RecoveryKey` and a new recovery-wrapped Vault Key). The moment
+the server stores the new bundle, the previous kit stops working. So: changing
+your password reissues the kit; the app must show the new code. The
+`recovery_verifier` itself is a deterministic branch of the (unchanged) Vault
+Key, so it is stable across these operations — what rotates is the kit *code*
+and the recovery-wrapped copy, not the verifier value.
+
 ### I12 — Every persisted crypto record binds its version/algorithm into AAD
 The format version is authenticated, not just present, so a record of one
 version can never be confused for another (crypto-agility safety). Item AAD
@@ -212,10 +222,50 @@ and diff it against the response. Enforced in `routes/accounts::prelogin` +
 `security::dummy_kdf_salt`; guarded by
 `api_flows::unknown_email_fails_indistinguishably`.
 
-The server additionally applies its own **random** per-account salt to the
-Argon2id pass over the AuthKey (I10), independent of this client salt.
+**Three distinct salts — don't conflate them.** They live in different places
+and defend different things:
+
+| Salt | Where | Feeds | Purpose |
+|------|-------|-------|---------|
+| **Client KDF salt** | `accounts.kdf_salt`, returned by `prelogin` | client Argon2id over the *master password* → Master Key | de-duplicates work factor across accounts; account-lifetime (I13) |
+| **Server auth salt** | inside `accounts.server_auth_hash` (PHC string) | server Argon2id over the *AuthKey* (I10) | so a stolen DB can't be replayed/precomputed against the stored credential |
+| **Export salt** | inside each export file's envelope | client Argon2id over the *export passphrase* | unlinkable, self-contained backups with no server and no account password |
+
+They are independent random values; none is secret. The client salt is public
+(any client needs it to derive); the server salt lives only in the server's
+hash and is never sent to clients.
+
+**Prelogin / offline-unlock cache lifecycle.** Online, every derivation fetches
+the client salt fresh from `prelogin`/`login` — so an account-lifetime salt is
+always current and there is nothing to invalidate. Offline, the desktop replica
+unlocks against the `AccountMeta` (salt + KDF params) cached at the last
+successful online login; it is refreshed on every subsequent login and, because
+the salt never rotates (I13), a stale cache still derives the correct key. A
+password change re-wraps the Vault Key but keeps the salt, so a cached salt is
+never wrong — only the wrapped-key blob must be re-fetched, which the next sync
+does.
 
 ---
+
+## Export file format (v1)
+
+The encrypted export (`encrypt_export`) is a self-contained JSON envelope —
+restorable without the server and without the account's master password (it has
+its own passphrase). Fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `format` | string | `"basementen-vault-export"` recognition marker |
+| `version` | u16 | `1`; checked for equality before decryption and bound into the AAD (I12) |
+| `kdf_params` | object | Argon2id `memory_kib` / `iterations` / `parallelism`, validated against the floor (I7); authenticated *implicitly* — they key the derivation, so altering them yields a wrong key and decryption fails |
+| `salt` | 16 bytes | random export salt (see table above) |
+| `nonce` | 24 bytes | random XChaCha20-Poly1305 nonce (I3) |
+| `ciphertext` | bytes | XChaCha20-Poly1305(payload) with AAD = `"basementen-vault/export" ‖ version_le` |
+
+Key derivation: `Argon2id(passphrase, salt, kdf_params) → 32-byte key`. The
+payload plaintext is whatever the caller serialized (the vault items); the
+envelope format is agnostic to it. Defined in `core/vault-core/src/export.rs`;
+guarded by `proptests::export_roundtrip_and_tamper`.
 
 ## How to use this file
 

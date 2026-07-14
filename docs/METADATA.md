@@ -18,7 +18,7 @@ the actual schema (`server/vault-server/migrations/`).
 | Per-item modification cadence | `vault_items.updated_at`, `seq`, `revision` | Reveals *when* and *how often* items change, not what. |
 | Item identifiers | `vault_items.item_id` (UUIDv7) | Random v7 UUIDs; the embedded timestamp reveals item *creation* time. |
 | Deletions | `vault_items.deleted` tombstones | Reveals that an item existed and was deleted. |
-| Device names | `sessions.device_name` | **Client-supplied and optional** — defaults to empty. Users who don't want a hostname on file can leave it blank; the app sends the OS hostname by default. |
+| Device names | `sessions.device_name` | **Client-supplied.** The desktop/mobile app sends the device hostname (falling back to `"desktop"`) so the device list is readable; the field is *optional at the protocol level* — a client may send an empty string, which is stored as-is. The server sanitizes it (strips control characters, caps at 64 chars) but never invents one. Opt-out today means a client that sends `""`; an in-app toggle is the tracked follow-up below. |
 | Login / session activity | `sessions.created_at`, refresh cadence | When and how often the user logs in, per device. |
 | MFA status | presence of a `totp` row | Whether TOTP is enabled (not the secret's use). |
 | Client IP addresses | rate limiter (in-memory) + reverse-proxy logs | **Not persisted** by the app; the in-memory limiter forgets on restart. Your reverse proxy (Caddy/nginx) may log IPs — configure it per your privacy needs. |

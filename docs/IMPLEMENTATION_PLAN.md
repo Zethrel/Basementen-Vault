@@ -214,10 +214,18 @@ decryption capability, which breaks the entire model. So recovery is layered:
 - **Protocol: revision-based delta sync.** Client sends its last-seen global
   revision; server returns all items changed since. Writes are optimistic:
   a write with a stale `revision` is rejected and the client merges.
-- **Conflict resolution:** last-writer-wins per item *field-group*, with the
-  losing version preserved in the item's history (encrypted, N latest
-  revisions kept) so nothing is silently destroyed. Deletes are tombstones,
-  purged after 30 days.
+- **Conflict resolution (as built): whole-item, server-wins, with a
+  conflict-copy.** The sync engine is zero-knowledge — it moves opaque
+  `content` ciphertext and never sees item fields — so field-level merge is
+  impossible by construction. Resolution is therefore at the **whole-item**
+  granularity: on a stale-`revision` push the server's version wins and is
+  adopted locally, while the losing local write is preserved verbatim as a
+  conflict record (`SyncReport.conflicts` carries the `losing_op` and the
+  `server_state`) which the app materializes as a separate "(conflict)" item.
+  Nothing is silently destroyed; the user reconciles fields by hand. (An
+  earlier draft of this plan said "per field-group" — that was never
+  achievable in a zero-knowledge engine and is corrected here.) Deletes are
+  tombstones, purged after 30 days.
 - **Offline-first.** Every client keeps a full encrypted local replica
   (SQLite via SQLCipher, or plain SQLite storing only ciphertext) and works
   fully offline; sync is opportunistic.
@@ -246,14 +254,20 @@ avoids re-implementing crypto five times.
 | **Core library** (crypto, vault model, sync engine) | **Rust** (`argon2`, `chacha20poly1305`, `hkdf`, `zeroize` crates — all RustCrypto, widely audited) | Memory safety for key handling, `zeroize` for scrubbing secrets, compiles to every target incl. iOS/Android (via UniFFI) and WASM |
 | Desktop apps (Win/macOS/Linux) | **Tauri** (Rust backend = the core lib, web UI) | Single codebase, small binaries, direct in-process use of the core |
 | Mobile apps (iOS/Android) | **Tauri 2 mobile** — the same app as desktop (revised from Flutter/KMP) | One codebase for all five platforms; the Rust core runs in-process; see `docs/MOBILE.md` |
-| Server | **Rust (axum)** or **Go** | Stateless API + PostgreSQL; the server does little, so pick team familiarity |
-| Database | **PostgreSQL** | Row-level per-user isolation, proven operational story |
+| Server | **Rust (axum)** *(as built)* | Stateless API; the server does little and stores only ciphertext |
+| Database | **SQLite** *(as built)* | One file, zero-admin, matches the "self-host from home" goal; PostgreSQL remains an optional future backend for larger multi-tenant deployments |
 | Client local store | SQLite (ciphertext-only rows) | Offline-first replica |
-| Tokens | PASETO v4 (or JWT with strict alg allowlist) | Avoids JWT's foot-guns |
+| Tokens | Opaque random bearer tokens, stored only as SHA-256 *(as built)* | Chosen over PASETO/JWT: nothing to forge or mis-verify, trivial server-side revocation, and no signature-algorithm foot-guns (see THREAT_MODEL §A4b) |
+
+The plan originally proposed PostgreSQL and PASETO/JWT. As built, the server
+uses **SQLite** (a single file is a better fit for home self-hosting; see
+`docs/SELF_HOSTING.md`) and **opaque hashed bearer tokens** (no token to forge;
+revocation is a row update). PostgreSQL support can come later if a deployment
+needs it.
 
 If team familiarity makes Rust too slow to start with, the acceptable fallback
 is a TypeScript core using `libsodium.js` — but the Rust core is the
-recommendation and the rest of this plan assumes it.
+recommendation and the rest of this plan assumes it (and is what shipped).
 
 ---
 
