@@ -1,0 +1,13 @@
+# Keep the build context small and reproducible. The server image only needs
+# source + manifests; everything below is either huge, irrelevant, or generated.
+target/
+**/target/
+.git/
+.github/
+apps/desktop/gen/
+apps/desktop/ui/node_modules/
+**/node_modules/
+*.log
+*.db
+*.db-wal
+*.db-shm

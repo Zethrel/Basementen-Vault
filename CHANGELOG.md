@@ -89,6 +89,19 @@ reaches 1.0.
 - Responded to three rounds of external architecture review plus follow-on
   hardening passes; reconciled documentation inconsistencies.
 
+### Build & release tooling
+
+- **GitHub Actions release workflow** (`.github/workflows/release.yml`): on a
+  version tag, builds desktop bundles (macOS/Linux/Windows) via `tauri-action`,
+  pushes a **multi-arch** (`amd64`/`arm64`) server image to GHCR, generates
+  `SHA256SUMS`, and opens a draft release (unsigned unless signing secrets are
+  set; `:latest` not auto-moved).
+- Enabled Tauri bundling (`bundle.active`) with generated Windows/macOS icons
+  (`.ico` / `.icns`).
+- **Fixed the server `Dockerfile`** to build against the current workspace (it
+  predated the `apps/*` crates and no longer loaded the workspace); added a
+  `.dockerignore`.
+
 ### Known limitations (not yet addressed)
 
 - **No independent security audit yet** — the blocker before production use.

@@ -1,0 +1,150 @@
+# Release build: triggered by pushing a version tag (e.g. `v1.0.0`).
+#
+# Produces a DRAFT GitHub Release with desktop bundles for macOS / Linux /
+# Windows, a SHA256SUMS file, and pushes a multi-arch server image to GHCR.
+# The release is left as a draft and `:latest` is deliberately NOT moved — a
+# human verifies the artifacts end-to-end (docs/RELEASE_CHECKLIST.md) before
+# publishing and retagging `latest`.
+#
+# Code signing / notarization: set the APPLE_* / signing repository secrets to
+# produce SIGNED builds. Without them, bundles build UNSIGNED — fine for testing,
+# not for a public release (the checklist gates on signed artifacts).
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # create the release + upload assets
+  packages: write # push the server image to GHCR
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  desktop:
+    name: Desktop bundle (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+          - platform: ubuntu-22.04
+            rust_targets: ""
+            args: ""
+          - platform: windows-latest
+            rust_targets: ""
+            args: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux bundling dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev \
+            libayatana-appindicator3-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and upload desktop bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional macOS Developer ID signing + notarization. Leave unset for
+          # unsigned test builds.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "Basementen Vault ${{ github.ref_name }}"
+          releaseBody: |
+            Desktop builds for ${{ github.ref_name }}. See CHANGELOG.md.
+
+            **Unaudited beta** — verify `SHA256SUMS` before installing, and do not
+            store irreplaceable secrets until an independent security audit is done.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  server-image:
+    name: Server image (multi-arch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ steps.img.outputs.name }}
+          # Version tags only. `:latest` is intentionally not moved here — retag
+          # it by hand after end-to-end verification (RELEASE_CHECKLIST §7).
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  checksums:
+    name: Publish SHA256SUMS
+    needs: desktop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the draft release's assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" --dir dist --pattern '*'
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          # Write outside the dir first so the sums file can't hash itself.
+          sha256sum * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+
+      - name: Upload SHA256SUMS to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" --clobber

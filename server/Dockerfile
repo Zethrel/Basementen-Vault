@@ -1,9 +1,11 @@
 FROM rust:1.94-slim AS builder
 WORKDIR /build
-COPY Cargo.toml Cargo.lock ./
-COPY core ./core
-COPY server ./server
-RUN cargo build --release -p vault-server
+# Copy the whole workspace: Cargo must load every member manifest to resolve the
+# workspace (root Cargo.toml lists apps/* too), even though `-p vault-server`
+# only compiles the server and its dependencies. Build context is the repo root
+# (`docker build -f server/Dockerfile .`); .dockerignore trims target/, .git, …
+COPY . .
+RUN cargo build --release --locked -p vault-server
 
 FROM debian:bookworm-slim
 RUN apt-get update \

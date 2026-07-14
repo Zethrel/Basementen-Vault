@@ -7,6 +7,14 @@ the release tracking issue and check items off there.
 
 Legend: 🚧 = hard gate (do not proceed until met).
 
+> **Automation.** Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`,
+> which builds the desktop bundles (macOS/Linux/Windows), pushes a multi-arch
+> server image to GHCR, generates `SHA256SUMS`, and opens a **draft** release.
+> It does **not** sign builds unless the `APPLE_*` (and Windows signing) secrets
+> are set, and it does **not** move `:latest`. The steps below are still yours to
+> verify — the workflow does the mechanical parts, not the judgement calls (§0,
+> §2, §5, and publishing).
+
 ---
 
 ## 0. Hard gates before *any* 1.0 release
