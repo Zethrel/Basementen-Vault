@@ -147,8 +147,10 @@ minimizes that lifetime and makes every token revocable:
   indefinitely — re-login (and thus the master password + MFA) is forced.
 - **Revocation:** the user can list active devices (`GET /sessions`) and
   revoke any one (`DELETE /sessions/{family}`) or all others
-  (`POST /sessions/revoke-others`) from the app; recovery and (future)
-  password change revoke every session.
+  (`POST /sessions/revoke-others`) from the app; recovery revokes every
+  session, and a **master-password change** (`POST /account/change-password`)
+  revokes every *other* session while keeping the device that made the change
+  signed in.
 - Tokens are server-generated random values, never client-supplied, so there
   is no session fixation. The API authenticates via the `Authorization`
   header, not cookies, so CSRF does not apply.

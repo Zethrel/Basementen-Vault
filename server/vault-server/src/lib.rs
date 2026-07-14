@@ -114,6 +114,10 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::recovery::set_backup_email).delete(routes::recovery::remove_backup_email),
         )
         .route(
+            "/api/v1/account/change-password",
+            post(routes::recovery::change_password),
+        )
+        .route(
             "/api/v1/accounts/verify-backup",
             get(routes::recovery::verify_backup_email),
         )

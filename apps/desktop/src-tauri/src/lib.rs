@@ -709,6 +709,78 @@ async fn regenerate_recovery_codes(
 }
 
 // ---------------------------------------------------------------------------
+// Change master password
+
+#[derive(Serialize)]
+struct ChangePasswordResult {
+    /// The NEW Recovery Kit code — the previous one stops working. Show it once.
+    recovery_code: String,
+}
+
+/// Re-encrypt the vault under a new master password. Requires the current
+/// password (and a 2FA code when enrolled). The Vault Key is unchanged, so
+/// items are preserved; a fresh Recovery Kit is issued and other devices are
+/// signed out.
+#[tauri::command]
+async fn change_password(
+    ctx: Ctx<'_>,
+    current_password: String,
+    new_password: String,
+    totp_code: Option<String>,
+) -> Result<ChangePasswordResult, String> {
+    let current_password = Zeroizing::new(current_password);
+    let new_password = Zeroizing::new(new_password);
+
+    let mut inner = ctx.inner.lock().await;
+    let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
+    unlocked.autolock.touch();
+
+    // Same strength gates as registration (guessability keyed on the e-mail).
+    desktop_core::check_password_strength(&new_password)?;
+    desktop_core::check_password_guessability(&new_password, &[unlocked.email.as_str()])?;
+    reject_if_breached(&new_password).await?;
+
+    let meta = unlocked.vault.account_meta().ok_or("no account metadata")?;
+    // Proof of the *current* password.
+    let current_credential =
+        vault_core::account::login_credential(&current_password, &meta.kdf_salt, &meta.kdf_params)
+            .map_err(err)?
+            .to_server_credential();
+    // Re-wrap the (unchanged) Vault Key under the new password; reuse the salt.
+    let new_reg = vault_core::account::change_password(
+        &unlocked.secrets,
+        &new_password,
+        &meta.kdf_salt,
+        meta.kdf_params.clone(),
+    )
+    .map_err(err)?;
+
+    unlocked
+        .api
+        .change_password(current_credential, totp_code.as_deref(), &new_reg.bundle)
+        .await
+        .map_err(err)?;
+
+    // Persist the new wrapped key so offline unlock uses the new password, and
+    // swap in the new secrets (new AuthKey; same Vault Key).
+    unlocked
+        .vault
+        .set_account_meta(&AccountMeta {
+            server_url: meta.server_url.clone(),
+            email: meta.email.clone(),
+            kdf_params: new_reg.bundle.kdf_params.clone(),
+            kdf_salt: meta.kdf_salt.clone(),
+            master_wrapped_vault_key: new_reg.bundle.master_wrapped_vault_key.clone(),
+        })
+        .map_err(err)?;
+    unlocked.secrets = new_reg.secrets;
+
+    Ok(ChangePasswordResult {
+        recovery_code: new_reg.recovery_code.to_string(),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Export / import
 
 fn decrypted_items(unlocked: &Unlocked) -> Vec<Item> {
@@ -932,6 +1004,7 @@ pub fn run() {
             totp_activate,
             totp_disable,
             regenerate_recovery_codes,
+            change_password,
             list_sessions,
             revoke_session,
             revoke_other_sessions,

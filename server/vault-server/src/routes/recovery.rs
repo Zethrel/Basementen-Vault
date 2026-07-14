@@ -649,3 +649,105 @@ pub async fn remove_backup_email(
 
     Ok(Json(json!({ "status": "ok" })))
 }
+
+// ---------------------------------------------------------------------------
+// Change master password
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    /// base64url of the *current* auth credential — proof of the old password.
+    pub auth_credential: String,
+    pub totp_code: Option<String>,
+    /// The replacement bundle, produced client-side under the new password.
+    /// The KDF salt is deliberately absent: it is account-lifetime (I13) and
+    /// never rotates on a password change.
+    pub new_auth_credential: String,
+    pub kdf_params: KdfParams,
+    pub master_wrapped_vault_key: Value,
+    pub recovery_wrapped_vault_key: Value,
+    pub new_recovery_verifier: String,
+}
+
+/// POST /api/v1/account/change-password
+///
+/// Re-key the account under a new master password. Requires proof of the
+/// current password (and TOTP when enrolled). The Vault Key is unchanged — the
+/// client just re-wraps it — so vault items stay readable; a fresh Recovery Kit
+/// is issued (new recovery-wrapped copy). Every *other* session is revoked; the
+/// calling device stays signed in.
+pub async fn change_password(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    session: AuthSession,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let account = db::account_by_id(&state.db, session.account_id)
+        .await?
+        .ok_or(ApiError::Internal)?;
+    confirm_sensitive(
+        &state,
+        &account,
+        &req.auth_credential,
+        req.totp_code.as_deref(),
+        ip,
+    )
+    .await?;
+
+    req.kdf_params
+        .validate()
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let new_credential = decode32(&req.new_auth_credential, "new_auth_credential")?;
+    let new_verifier = decode32(&req.new_recovery_verifier, "new_recovery_verifier")?;
+    let now = security::now();
+
+    let mut tx = state.db.begin().await?;
+    // Salt and Vault-Key identity are preserved; only the password-derived
+    // wrapping (and the auth credential + recovery kit) change.
+    sqlx::query(
+        "UPDATE accounts SET
+           server_auth_hash = ?, kdf_params = ?,
+           master_wrapped_vault_key = ?, recovery_wrapped_vault_key = ?,
+           recovery_verifier_hash = ?, failed_attempts = 0, lockout_until = NULL
+         WHERE id = ?",
+    )
+    .bind(security::hash_credential(&new_credential))
+    .bind(serde_json::to_string(&req.kdf_params).map_err(|_| ApiError::Internal)?)
+    .bind(req.master_wrapped_vault_key.to_string())
+    .bind(req.recovery_wrapped_vault_key.to_string())
+    .bind(security::sha256(&new_verifier))
+    .bind(account.id)
+    .execute(&mut *tx)
+    .await?;
+    // Sign out every other device (the current family stays valid).
+    sqlx::query(
+        "UPDATE sessions SET revoked_at = ?
+         WHERE account_id = ? AND family_id != ? AND revoked_at IS NULL",
+    )
+    .bind(now)
+    .bind(account.id)
+    .bind(&session.family_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    let body = "Your Basementen Vault master password was changed and a new Recovery Kit \
+                was issued. All your other devices have been signed out. If this was not \
+                you, use your Recovery Kit to regain control and contact your server \
+                administrator immediately.";
+    state
+        .mailer
+        .send(
+            &account.email,
+            "Basementen Vault: master password changed",
+            body,
+        )
+        .await;
+    if let Some(backup) = backup_email_of(&state, account.id).await? {
+        state
+            .mailer
+            .send(&backup, "Basementen Vault: master password changed", body)
+            .await;
+    }
+
+    Ok(Json(json!({ "status": "ok" })))
+}

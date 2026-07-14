@@ -578,6 +578,37 @@ $("mfa-codes-copy").addEventListener("click", async () => {
   $("mfa-codes-copy").textContent = "Copied (clears in 30 s)";
 });
 
+// --- change master password ---
+
+$("cp-submit").addEventListener("click", async () => {
+  $("cp-msg").textContent = "";
+  const btn = $("cp-submit");
+  const totp = $("cp-totp").value.trim();
+  btn.disabled = true;
+  try {
+    const res = await invoke("change_password", {
+      currentPassword: $("cp-current").value,
+      newPassword: $("cp-new").value,
+      totpCode: totp.length ? totp : null,
+    });
+    $("cp-current").value = "";
+    $("cp-new").value = "";
+    $("cp-totp").value = "";
+    $("cp-code").textContent = res.recovery_code;
+    $("cp-newkit").hidden = false;
+    await renderMfa(); // recovery codes count is unaffected, but refresh status
+  } catch (e) {
+    $("cp-msg").textContent = String(e);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("cp-code-copy").addEventListener("click", async () => {
+  await invoke("copy_secret", { text: $("cp-code").textContent });
+  $("cp-code-copy").textContent = "Copied (clears in 30 s)";
+});
+
 $("btn-export").addEventListener("click", async () => {
   $("xfer-msg").textContent = "";
   try {

@@ -119,6 +119,10 @@ fn credential_b64(reg: &vault_core::account::Registration) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(reg.bundle.auth_credential)
 }
 
+fn b64(bytes: impl AsRef<[u8]>) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
 /// Register + verify e-mail, returning the client-side registration.
 async fn register_and_verify(server: &TestServer) -> vault_core::account::Registration {
     let (reg, body) = client_bundle(EMAIL, PASSWORD);
@@ -1103,5 +1107,125 @@ async fn enumeration_secret_persists_across_restarts() {
     assert_ne!(
         *s1.enumeration_secret, *s3.enumeration_secret,
         "a separate database has its own secret"
+    );
+}
+
+#[tokio::test]
+async fn change_password_rewraps_preserves_data_and_revokes_others() {
+    let server = test_server().await;
+    let reg = register_and_verify(&server).await;
+
+    // Two devices logged in; stash an item under the current Vault Key.
+    let (access_a, _) = login_device(&server, &reg, "laptop").await;
+    let (access_b, _) = login_device(&server, &reg, "phone").await;
+    let item = reg
+        .secrets
+        .vault_key
+        .encrypt_item("note", 1, b"survives")
+        .unwrap();
+    let (status, _) = server
+        .request(
+            "PUT",
+            "/api/v1/vault/items/note",
+            Some(&access_a),
+            Some(serde_json::to_value(&item).unwrap()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Build the new bundle client-side (same Vault Key, new password).
+    const NEW_PW: &str = "an entirely different master password";
+    let new_reg = vault_core::account::change_password(
+        &reg.secrets,
+        NEW_PW,
+        &reg.bundle.kdf_salt,
+        vault_core::KdfParams::mobile_floor(),
+    )
+    .unwrap();
+    let cp_body = |cred: [u8; 32]| {
+        json!({
+            "auth_credential": b64(cred),
+            "new_auth_credential": b64(new_reg.bundle.auth_credential),
+            "kdf_params": new_reg.bundle.kdf_params,
+            "master_wrapped_vault_key": serde_json::to_value(&new_reg.bundle.master_wrapped_vault_key).unwrap(),
+            "recovery_wrapped_vault_key": serde_json::to_value(&new_reg.bundle.recovery_wrapped_vault_key).unwrap(),
+            "new_recovery_verifier": b64(new_reg.bundle.recovery_verifier),
+        })
+    };
+
+    // Wrong current password is rejected.
+    let (status, _) = server
+        .request(
+            "POST",
+            "/api/v1/account/change-password",
+            Some(&access_a),
+            Some(cp_body([0u8; 32])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Correct current credential succeeds.
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/account/change-password",
+            Some(&access_a),
+            Some(cp_body(reg.secrets.auth_key.to_server_credential())),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The other device is signed out; the current device keeps working.
+    let (status, _) = server
+        .request("GET", "/api/v1/vault/keys", Some(&access_b), None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "other device revoked");
+    let (status, _) = server
+        .request("GET", "/api/v1/vault/keys", Some(&access_a), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "current device stays signed in");
+
+    // Old password no longer logs in; the new one does.
+    let (status, _) = login(&server, &reg, json!({})).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "old password rejected");
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            Some(json!({
+                "email": EMAIL,
+                "auth_credential": b64(new_reg.secrets.auth_key.to_server_credential()),
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Salt is unchanged (account-lifetime), and the item still decrypts under
+    // the same Vault Key that the new password now unwraps.
+    let salt = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(body["kdf_salt"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(salt, reg.bundle.kdf_salt, "salt is account-lifetime");
+    let access_new = body["access_token"].as_str().unwrap().to_string();
+    let (_, items) = server
+        .request(
+            "GET",
+            "/api/v1/vault/items?since=0",
+            Some(&access_new),
+            None,
+        )
+        .await;
+    let stored: vault_core::EncryptedItem =
+        serde_json::from_value(items["items"][0]["content"].clone()).unwrap();
+    assert_eq!(
+        new_reg
+            .secrets
+            .vault_key
+            .decrypt_item(&stored)
+            .unwrap()
+            .as_slice(),
+        b"survives",
+        "vault data survives a password change"
     );
 }

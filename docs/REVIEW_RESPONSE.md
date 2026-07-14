@@ -489,6 +489,31 @@ Guarded by `mfa::tests` (QR render) and an end-to-end
 against a real server). No server changes — the endpoints already existed and
 were tested.
 
+## v1-readiness — change master password in the app (2026-07)
+
+The other advertised-but-unreachable feature: `vault_core::account::
+change_password` existed but had no server endpoint or UI. Now wired end to end:
+
+- **Server:** `POST /api/v1/account/change-password` — gated on a fresh
+  confirmation of the *current* password (and TOTP when enrolled, via the
+  shared `confirm_sensitive`). It stores the new auth hash, re-wrapped Vault
+  Key, and fresh recovery kit; **keeps the account-lifetime salt** (I13); and
+  revokes every *other* session (the current device stays signed in).
+- **Client:** `ApiClient::change_password`, a Tauri `change_password` command
+  that validates the new password with the full policy (composition +
+  guessability keyed on the e-mail + breach check), re-wraps the unchanged
+  Vault Key locally, updates the cached `AccountMeta` so offline unlock uses the
+  new password, and returns the **new Recovery Kit code** to show once.
+- **UI:** a "Change master password" section in Settings (current + new
+  password, 2FA code, requirement hint) that surfaces the new Recovery Kit and
+  warns the old one is spent.
+
+Crucially, the **Vault Key is unchanged**, so all items stay readable and no
+re-encryption of the vault is needed — only the password-derived wrapping and
+the recovery kit rotate. Guarded by
+`change_password_rewraps_preserves_data_and_revokes_others` (data survives,
+salt unchanged, other devices signed out, old password rejected, new one works).
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer

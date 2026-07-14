@@ -238,6 +238,27 @@
 
     <p id="mfa-msg" class="error" role="alert"></p>
     <hr class="sep" />
+    <h2>Change master password</h2>
+    <p class="muted small">Re-encrypts your vault under a new password and issues
+      a new Recovery Kit. Your other devices are signed out.</p>
+    <label>Current master password
+      <input id="cp-current" type="password" autocomplete="off" /></label>
+    <label>New master password
+      <input id="cp-new" type="password" autocomplete="off" /></label>
+    <p class="muted small">At least 12 characters, including a capital letter, a
+      number, and a special character. Avoid common words and predictable
+      patterns.</p>
+    <label>Two-factor code <span class="muted">(if enabled)</span>
+      <input id="cp-totp" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" /></label>
+    <div id="cp-newkit" hidden>
+      <p class="muted small"><strong>Your new Recovery Kit code</strong> — the
+        previous one no longer works. Save it somewhere safe.</p>
+      <pre id="cp-code" class="recovery-code"></pre>
+      <div class="row"><button id="cp-code-copy">Copy</button></div>
+    </div>
+    <p id="cp-msg" class="error" role="alert"></p>
+    <div class="row"><button id="cp-submit" class="primary">Change password</button></div>
+    <hr class="sep" />
     <h2>Active devices</h2>
     <p class="muted small">Everywhere your account is currently logged in.
       Revoke anything you don't recognise.</p>

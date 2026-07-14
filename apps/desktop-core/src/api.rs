@@ -480,6 +480,42 @@ impl ApiClient {
         }
     }
 
+    // --- change master password -------------------------------------------
+
+    /// Re-key the account under a new master password. `current_auth_credential`
+    /// proves the old password; `bundle` is the fresh registration produced by
+    /// `vault_core::account::change_password` (re-wrapped Vault Key + new
+    /// recovery kit). The server keeps the account-lifetime salt and revokes
+    /// every other session.
+    pub async fn change_password(
+        &mut self,
+        current_auth_credential: [u8; 32],
+        totp_code: Option<&str>,
+        bundle: &vault_core::RegistrationBundle,
+    ) -> Result<(), ApiError> {
+        let payload = json!({
+            "auth_credential": b64(current_auth_credential),
+            "totp_code": totp_code,
+            "new_auth_credential": b64(bundle.auth_credential),
+            "kdf_params": bundle.kdf_params,
+            "master_wrapped_vault_key": bundle.master_wrapped_vault_key,
+            "recovery_wrapped_vault_key": bundle.recovery_wrapped_vault_key,
+            "new_recovery_verifier": b64(bundle.recovery_verifier),
+        });
+        let (status, body) = self
+            .authed(move |http, base, token| {
+                http.post(format!("{base}/api/v1/account/change-password"))
+                    .json(&payload)
+                    .bearer_auth(token)
+            })
+            .await?;
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::classify(status, &body))
+        }
+    }
+
     // --- MFA maintenance --------------------------------------------------
 
     /// Whether TOTP is active and how many single-use recovery codes remain,
