@@ -226,7 +226,11 @@ impl TestAccount {
     }
 
     fn decrypt(&self, item: &EncryptedItem) -> Vec<u8> {
-        self.secrets.vault_key.decrypt_item(item).expect("decrypt")
+        self.secrets
+            .vault_key
+            .decrypt_item(item)
+            .expect("decrypt")
+            .to_vec()
     }
 }
 

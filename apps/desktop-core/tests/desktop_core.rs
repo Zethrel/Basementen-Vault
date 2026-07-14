@@ -48,7 +48,8 @@ fn sqlite_vault_persists_items_ops_and_cursor() {
         reg.secrets
             .vault_key
             .decrypt_item(stored.content.as_ref().unwrap())
-            .unwrap(),
+            .unwrap()
+            .as_slice(),
         b"data"
     );
     let meta = vault.account_meta().unwrap();
@@ -385,7 +386,8 @@ async fn api_client_recovery_lifecycle() {
             .secrets
             .vault_key
             .decrypt_item(stored.content.as_ref().unwrap())
-            .unwrap(),
+            .unwrap()
+            .as_slice(),
         b"survives recovery"
     );
 }

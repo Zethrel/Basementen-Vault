@@ -2,6 +2,7 @@ use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305, XNonce};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::error::CryptoError;
 use crate::keys::VaultKey;
@@ -75,7 +76,11 @@ impl VaultKey {
     /// Decrypt one vault item. Fails if the key is wrong, the ciphertext was
     /// tampered with, or the item ID / revision don't match what was bound
     /// at encryption time.
-    pub fn decrypt_item(&self, item: &EncryptedItem) -> Result<Vec<u8>, CryptoError> {
+    ///
+    /// The plaintext is returned in a [`Zeroizing`] buffer so it is scrubbed
+    /// from memory when the caller drops it (in-memory-plaintext hygiene; see
+    /// `docs/THREAT_MODEL.md` §A6).
+    pub fn decrypt_item(&self, item: &EncryptedItem) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
         if item.version != 1 {
             return Err(CryptoError::UnsupportedVersion(item.version));
         }
@@ -89,6 +94,7 @@ impl VaultKey {
                     aad: &aad_for(item.version, &item.item_id, item.revision),
                 },
             )
+            .map(Zeroizing::new)
             .map_err(|_| CryptoError::Decrypt)
     }
 }

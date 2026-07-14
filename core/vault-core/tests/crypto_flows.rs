@@ -175,7 +175,7 @@ fn item_encrypt_decrypt_roundtrip() {
     let vk = VaultKey::generate();
     let plaintext = br#"{"type":"login","name":"example.com","password":"hunter2"}"#;
     let item = vk.encrypt_item("item-123", 7, plaintext).unwrap();
-    assert_eq!(vk.decrypt_item(&item).unwrap(), plaintext);
+    assert_eq!(vk.decrypt_item(&item).unwrap().as_slice(), plaintext);
 }
 
 #[test]
@@ -283,7 +283,12 @@ fn full_recovery_flow_preserves_vault_data() {
     .unwrap();
 
     assert_eq!(
-        recovered.secrets.vault_key.decrypt_item(&item).unwrap(),
+        recovered
+            .secrets
+            .vault_key
+            .decrypt_item(&item)
+            .unwrap()
+            .as_slice(),
         b"do not lose me"
     );
     assert_ne!(
@@ -346,7 +351,7 @@ fn change_password_keeps_vault_key_and_rotates_credentials() {
 
     let unlocked = unlock("new password 42", &changed).unwrap();
     assert_eq!(
-        unlocked.vault_key.decrypt_item(&item).unwrap(),
+        unlocked.vault_key.decrypt_item(&item).unwrap().as_slice(),
         b"still here"
     );
 
@@ -360,7 +365,12 @@ fn change_password_keeps_vault_key_and_rotates_credentials() {
     )
     .unwrap();
     assert_eq!(
-        recovered.secrets.vault_key.decrypt_item(&item).unwrap(),
+        recovered
+            .secrets
+            .vault_key
+            .decrypt_item(&item)
+            .unwrap()
+            .as_slice(),
         b"still here"
     );
 }
@@ -386,7 +396,14 @@ fn encrypted_structures_serialize_roundtrip() {
         &wrapped_back,
     )
     .unwrap();
-    assert_eq!(unlocked.vault_key.decrypt_item(&item_back).unwrap(), b"x");
+    assert_eq!(
+        unlocked
+            .vault_key
+            .decrypt_item(&item_back)
+            .unwrap()
+            .as_slice(),
+        b"x"
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -270,6 +270,7 @@ dependencies = [
  "uuid",
  "vault-core",
  "vault-sync",
+ "zeroize",
 ]
 
 [[package]]

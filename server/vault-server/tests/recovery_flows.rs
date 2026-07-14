@@ -283,7 +283,12 @@ async fn full_recovery_with_kit_preserves_vault() {
     let item: vault_core::EncryptedItem =
         serde_json::from_value(body["items"][0]["content"].clone()).unwrap();
     assert_eq!(
-        new_reg.secrets.vault_key.decrypt_item(&item).unwrap(),
+        new_reg
+            .secrets
+            .vault_key
+            .decrypt_item(&item)
+            .unwrap()
+            .as_slice(),
         b"do not lose"
     );
 

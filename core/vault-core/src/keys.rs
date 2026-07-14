@@ -2,7 +2,7 @@ use hkdf::Hkdf;
 use rand_core::{OsRng, RngCore};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 pub const KEY_LEN: usize = 32;
 
@@ -84,13 +84,17 @@ impl MasterKey {
     /// server sees) reveals nothing about the WrappingKey.
     pub fn derive_subkeys(&self) -> (AuthKey, WrappingKey) {
         let hk = Hkdf::<Sha256>::new(None, self.as_bytes());
-        let mut auth = [0u8; KEY_LEN];
-        let mut wrap = [0u8; KEY_LEN];
-        hk.expand(INFO_AUTH, &mut auth)
+        // Derive into `Zeroizing` scratch so the transient subkey copies left
+        // on the stack after moving into the key types are scrubbed, not left
+        // lying around (in-memory-plaintext hygiene; the key types themselves
+        // are `ZeroizeOnDrop`).
+        let mut auth = Zeroizing::new([0u8; KEY_LEN]);
+        let mut wrap = Zeroizing::new([0u8; KEY_LEN]);
+        hk.expand(INFO_AUTH, auth.as_mut())
             .expect("32 bytes is a valid HKDF-SHA256 output length");
-        hk.expand(INFO_WRAP, &mut wrap)
+        hk.expand(INFO_WRAP, wrap.as_mut())
             .expect("32 bytes is a valid HKDF-SHA256 output length");
-        (AuthKey::from_bytes(auth), WrappingKey::from_bytes(wrap))
+        (AuthKey::from_bytes(*auth), WrappingKey::from_bytes(*wrap))
     }
 }
 

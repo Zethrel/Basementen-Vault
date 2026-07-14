@@ -74,7 +74,8 @@ proptest! {
     ) {
         let vk = VaultKey::generate();
         let item = vk.encrypt_item(&item_id, revision, &plaintext).unwrap();
-        prop_assert_eq!(vk.decrypt_item(&item).unwrap(), plaintext);
+        let decrypted = vk.decrypt_item(&item).unwrap();
+        prop_assert_eq!(decrypted.as_slice(), plaintext.as_slice());
 
         let mut tampered = item.clone();
         let idx = corrupt_at.index(tampered.ciphertext.len());

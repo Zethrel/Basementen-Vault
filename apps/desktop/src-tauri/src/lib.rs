@@ -14,6 +14,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use vault_core::account::AccountSecrets;
 use vault_sync::{LocalVault, PendingOp};
+use zeroize::Zeroizing;
 
 /// Everything that exists only while the vault is unlocked. Dropping this
 /// struct locks the vault: `AccountSecrets` zeroizes its keys on drop.
@@ -55,8 +56,11 @@ fn encrypt_refresh_token(
 
 fn decrypt_refresh_token(secrets: &AccountSecrets, vault: &SqliteVault) -> Option<String> {
     let envelope = vault.encrypted_refresh_token()?;
+    // `bytes` is `Zeroizing`: the decrypted token buffer is scrubbed on drop.
+    // The returned String (and its copy inside the ApiClient / reqwest headers)
+    // is a session credential, not a vault secret — see THREAT_MODEL §A6.
     let bytes = secrets.vault_key.decrypt_item(&envelope).ok()?;
-    String::from_utf8(bytes).ok()
+    std::str::from_utf8(&bytes).ok().map(String::from)
 }
 
 /// Outcome of a best-effort sync.
@@ -146,6 +150,7 @@ async fn register(
     email: String,
     password: String,
 ) -> Result<RegisterResult, String> {
+    let password = Zeroizing::new(password);
     if password.chars().count() < 12 {
         return Err("master password must be at least 12 characters".into());
     }
@@ -166,6 +171,7 @@ async fn login(
     password: String,
     totp_code: Option<String>,
 ) -> Result<Status, String> {
+    let password = Zeroizing::new(password);
     let mut api = ApiClient::new(&server_url);
     let prelogin = api.prelogin(&email).await.map_err(err)?;
     let credential =
@@ -220,6 +226,7 @@ async fn login(
 /// session from the encrypted refresh token when the network allows.
 #[tauri::command]
 async fn unlock(ctx: Ctx<'_>, password: String) -> Result<Status, String> {
+    let password = Zeroizing::new(password);
     let vault = SqliteVault::open(&ctx.db_path).map_err(err)?;
     let meta = vault
         .account_meta()
@@ -473,6 +480,8 @@ async fn recover_complete(
     new_password: String,
     wipe: bool,
 ) -> Result<RecoverResult, String> {
+    let new_password = Zeroizing::new(new_password);
+    let recovery_code = recovery_code.map(Zeroizing::new);
     if new_password.chars().count() < 12 {
         return Err("master password must be at least 12 characters".into());
     }
@@ -539,6 +548,7 @@ async fn set_backup_email(
     totp_code: Option<String>,
     backup_email: String,
 ) -> Result<String, String> {
+    let password = Zeroizing::new(password);
     let mut inner = ctx.inner.lock().await;
     let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
     unlocked.autolock.touch();
@@ -562,6 +572,7 @@ async fn remove_backup_email(
     password: String,
     totp_code: Option<String>,
 ) -> Result<(), String> {
+    let password = Zeroizing::new(password);
     let mut inner = ctx.inner.lock().await;
     let unlocked = inner.session.as_mut().ok_or("vault is locked")?;
     unlocked.autolock.touch();
@@ -606,6 +617,7 @@ async fn export_vault(
     ctx: Ctx<'_>,
     passphrase: String,
 ) -> Result<String, String> {
+    let passphrase = Zeroizing::new(passphrase);
     if passphrase.chars().count() < 12 {
         return Err("export passphrase must be at least 12 characters".into());
     }
@@ -650,9 +662,11 @@ async fn import_vault(
     let contents = std::fs::read_to_string(&path).map_err(err)?;
 
     let items = if contents.contains("basementen-vault-export") {
-        let passphrase = passphrase
-            .filter(|p| !p.is_empty())
-            .ok_or("this is an encrypted backup — enter its passphrase")?;
+        let passphrase = Zeroizing::new(
+            passphrase
+                .filter(|p| !p.is_empty())
+                .ok_or("this is an encrypted backup — enter its passphrase")?,
+        );
         desktop_core::import_encrypted(&contents, &passphrase).map_err(err)?
     } else {
         desktop_core::import_csv(&contents).map_err(err)?

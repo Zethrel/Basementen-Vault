@@ -2,11 +2,18 @@
 //! search over decrypted items.
 
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 /// A decrypted vault item. Tagged JSON so new types can be added without
 /// breaking old clients (unknown types round-trip as `Other`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Holds the most sensitive plaintext in the client (passwords, card numbers,
+/// notes), so it is `ZeroizeOnDrop`: the moment an `Item` goes out of scope its
+/// string fields are scrubbed. `Debug` is redacted (never print secret fields —
+/// invariant I8). Note this only governs the Rust-side lifetime; a copy handed
+/// to the web UI for display lives in the JavaScript heap beyond our reach (see
+/// `docs/THREAT_MODEL.md` §A6).
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Item {
     Login {
@@ -44,6 +51,14 @@ pub enum Item {
         #[serde(default)]
         tags: Vec<String>,
     },
+}
+
+/// Redacted `Debug`: shows the item kind and nothing else, so an accidental
+/// `{:?}` (a log line, a panic message) can never spill a password or note.
+impl core::fmt::Debug for Item {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Item::{}(<redacted>)", self.kind())
+    }
 }
 
 impl Item {
@@ -146,5 +161,26 @@ impl ItemSummary {
             name: item.name().to_string(),
             subtitle,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_never_prints_secret_fields() {
+        let item = Item::Login {
+            name: "example.com".into(),
+            username: "alice".into(),
+            password: "hunter2-super-secret".into(),
+            url: "https://example.com".into(),
+            notes: "private note".into(),
+            tags: vec![],
+        };
+        let rendered = format!("{item:?}");
+        assert_eq!(rendered, "Item::login(<redacted>)");
+        assert!(!rendered.contains("hunter2"));
+        assert!(!rendered.contains("private note"));
     }
 }
