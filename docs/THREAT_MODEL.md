@@ -223,6 +223,41 @@ posture of mainstream products; they are listed here so an auditor sees them
 stated, not hidden. Page-locking and core-dump suppression are tracked
 below.
 
+**In-memory-plaintext map (audit, 2026-07).** Every place a plaintext secret
+lives in the *Rust* process, how long, and whether it is scrubbed:
+
+| Secret | Where | Lifetime | Scrubbed? |
+|--------|-------|----------|-----------|
+| Master password / export passphrase | `String` arg into a Tauri command | one command call | **Yes** — wrapped in `Zeroizing` at entry |
+| Master Key, Auth/Wrapping/Vault/Recovery keys | `keys.rs` key types | unlock → lock | **Yes** — `Zeroize`+`ZeroizeOnDrop`; subkey scratch is `Zeroizing` |
+| KDF Argon2id output buffer | `derive_master_key` | derivation only | **Yes** — `Zeroizing` |
+| Decrypted item bytes | `decrypt_item` result | until caller drops | **Yes** — returns `Zeroizing<Vec<u8>>` |
+| Decrypted `Item` (password, card #, notes) | `Item` model | while displayed/edited server-side | **Yes** — `ZeroizeOnDrop`; `Debug` redacted |
+| Serialized item plaintext (pre-encrypt) | `Item::to_plaintext` | until sealed | **Yes** — `Zeroizing` |
+| Generated password | `generate_password` result | until dropped/copied | **Yes** — `Zeroizing<String>` (the transient `Vec<char>` is not `Zeroize`-able and is a brief exception) |
+| Recovery Kit code | `Registration.recovery_code`; Tauri result | until shown once | Core copy `Zeroizing`; the `String` handed to the UI is **not** (see below) |
+| Session refresh/access tokens | `ApiClient`, reqwest headers | session | **No** — plain `String` (a bearer credential, not a vault secret) |
+
+**Residuals this audit deliberately leaves open (not fixable in Rust):**
+
+- **The web-UI / JavaScript heap is the dominant residual.** Any secret shown
+  or edited — an item password, the generated password, the Recovery Kit code
+  — is serialized across the Tauri bridge into the WebView, where it lives in
+  the **JS heap** as strings that Rust cannot reach and the JS GC will not
+  scrub on any schedule. This is inherent to a web-UI password manager
+  (Bitwarden, 1Password's Electron app, etc. share it). Auto-lock drops the
+  Rust session but cannot evict JS strings; only closing the WebView does.
+  A native-widget UI (or a WebAssembly core owning its own scrubbed buffers)
+  would be required to close it — a large architectural change, tracked, not
+  planned for v1.
+- **Session tokens** sit in the API client and in reqwest's header buffers as
+  plain UTF-8. They are session credentials (revocable, short-TTL — §A4b), not
+  vault secrets, and TLS/reqwest would copy them regardless, so they are left
+  unscrubbed by design.
+- **The transient `Vec<char>`** inside the password generator holds the
+  password briefly before it is collected into a `Zeroizing<String>`; `char`
+  is not zeroizable in place. Negligible and noted for completeness.
+
 **Residual risk:** malware on an *unlocked* device reads process memory —
 out of scope for any password manager. Zeroization on lock narrows the
 window; it does not close it against a live attacker on the device.
@@ -277,6 +312,7 @@ Ordered roughly by priority for post-v1 work.
 | No WebAuthn second factor | Medium | Deferred: WebKit webviews (Tauri) lack usable `navigator.credentials` platform-authenticator support; revisit with the browser extension or native FFI. TOTP + single-use recovery codes cover v1. |
 | No compromised-password (HIBP) check + `zxcvbn` strength scoring at registration | Medium | Backlog. Only the ≥12-char minimum is enforced today. HIBP via SHA-1 k-anonymity (prefix query; password never leaves the device). |
 | Key pages not `mlock`ed; core dumps not suppressed | Medium | See §A6 memory table. |
+| Plaintext secrets in the WebView / JS heap | Medium | Inherent to a web-UI password manager: secrets shown/edited live in the JS heap until the view closes, beyond Rust's zeroization. Closing it needs a native-widget or WASM-core UI. Rust-side lifetime is now fully scrubbed (§A6 in-memory map). |
 | `prelogin` enumeration secret is per-process | Low | Dummy KDF salts for unknown accounts are stable within a server run but reshuffle on restart. See the exploitability analysis below — it is not practically exploitable; persisting the secret closes even the theoretical signal. Deferred, consistent with the existing per-process `dummy_hash`. |
 | Bearer access tokens are replayable for ≤15 min | Low | Sender-constrained tokens (DPoP proof-of-possession or mTLS) would eliminate the replay window (§A4b). Deferred; short TTL + rotation + revocation is the v1 posture. |
 | Mobile Argon2 parameters possibly conservative | Low | Floor is `m=19 MiB, t=2, p=1`; desktop `m=64 MiB, t=3, p=4`. Benchmark real unlock times per device class and raise toward `m=64–128 MiB` where UX allows — reviewer note. Parameters are per-account and versioned, so raising them later is a normal password-change (`RUNBOOK.md` §KDF migration). |

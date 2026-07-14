@@ -315,6 +315,39 @@ ambiguities. Every point is now fixed or answered in-place:
   restart and re-querying across it, never a disclosure or auth path;
   persisting the secret closes even that (THREAT_MODEL gaps).
 
+## In-memory-plaintext audit — the reviewer's #4 milestone (2026-07)
+
+The last item on the agreed pre-audit list: trace every plaintext secret in
+client memory, scrub what we control, and document the rest honestly.
+
+Already good: all key types were `Zeroize`/`ZeroizeOnDrop`, the KDF output and
+pre-encryption item buffer used `Zeroizing`, and auto-lock dropped the session
+to scrub keys. The audit found and fixed the gaps where *decrypted* plaintext
+lingered:
+
+- **`decrypt_item` now returns `Zeroizing<Vec<u8>>`** (matching
+  `decrypt_export`), so every decrypted item buffer is scrubbed on drop.
+- **The `Item` model is now `ZeroizeOnDrop`** — it holds the most sensitive
+  plaintext (passwords, card numbers, notes) — and its `Debug` is **redacted**;
+  it previously derived `Debug`, which would have printed secret fields (an I8
+  violation). New test: `debug_never_prints_secret_fields`.
+- **Tauri command password/passphrase/recovery-code args are wrapped in
+  `Zeroizing`**, so the master password isn't left in the deserialized request
+  buffer after the call.
+- **`derive_subkeys` uses `Zeroizing` scratch**, scrubbing the transient
+  subkey copies otherwise left on the stack.
+
+Documented residuals we deliberately don't chase (they can't be fixed in Rust):
+the **JavaScript heap** is the dominant one — any secret shown or edited is
+serialized into the WebView and lives there beyond Rust's reach until the view
+closes; **session tokens** stay plain in the API client / reqwest headers (a
+revocable session credential, not a vault secret, and TLS copies them anyway).
+Both, plus a full secret-by-secret lifetime table, are now in THREAT_MODEL §A6.
+
+This completes the reviewer's proposed pre-audit milestones (session, sync,
+recovery/enrollment, in-memory audit). The external penetration test / crypto
+review remains the hard blocker before real-world use.
+
 ## Standing invitation
 
 We welcome continuous review. The most useful next artifacts for a reviewer
