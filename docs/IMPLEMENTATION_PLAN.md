@@ -107,9 +107,14 @@ master password + random per-account salt (from prelogin)
 ### 3.1 Registration
 
 1. User enters e-mail + master password. **As built:** the client enforces a
-   ≥ 12-character minimum. **Backlog (not yet implemented):** local `zxcvbn`
+   strength policy (`desktop_core::check_password_strength`) — ≥ 12 characters
+   plus at least one capital letter, one number, and one special character —
+   applied at registration *and* recovery (so recovery can't set a weaker
+   password). Enforcement is client-side by necessity: the server is
+   zero-knowledge and never receives the password. **Backlog:** local `zxcvbn`
    strength scoring and a Have I Been Pwned k-anonymity check (queried by
-   SHA-1 prefix so the password itself never leaves the device). Tracked in
+   SHA-1 prefix so the password itself never leaves the device), which catch
+   long-but-breached passphrases that composition rules miss. Tracked in
    `THREAT_MODEL.md` §Known gaps.
 2. Client derives MK → AuthKey + WrappingKey, generates VK, wraps VK.
 3. Client sends: e-mail, AuthKey, wrapped VK, KDF parameters.

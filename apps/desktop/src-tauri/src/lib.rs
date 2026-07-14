@@ -151,9 +151,7 @@ async fn register(
     password: String,
 ) -> Result<RegisterResult, String> {
     let password = Zeroizing::new(password);
-    if password.chars().count() < 12 {
-        return Err("master password must be at least 12 characters".into());
-    }
+    desktop_core::check_password_strength(&password)?;
     let reg =
         vault_core::account::register(&password, vault_core::KdfParams::desktop()).map_err(err)?;
     let api = ApiClient::new(&server_url);
@@ -482,9 +480,7 @@ async fn recover_complete(
 ) -> Result<RecoverResult, String> {
     let new_password = Zeroizing::new(new_password);
     let recovery_code = recovery_code.map(Zeroizing::new);
-    if new_password.chars().count() < 12 {
-        return Err("master password must be at least 12 characters".into());
-    }
+    desktop_core::check_password_strength(&new_password)?;
     let api = ApiClient::new(&server_url);
     let data = api.recovery_data(&token).await.map_err(|e| match e {
         desktop_core::ApiError::CoolingOff { retry_after_secs } => format!(

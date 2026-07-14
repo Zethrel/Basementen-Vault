@@ -20,8 +20,9 @@ Honesty about this matters more than looking finished:
   (IMPLEMENTATION_PLAN §2.1, CRYPTOGRAPHIC_INVARIANTS §Salt). This directly
   answers the reviewer's concern #1.
 - **Registration password checks.** The plan implied `zxcvbn` + HIBP were
-  implemented; only the ≥12-char minimum is. Reworded to "as built" vs
-  "backlog," and tracked in the threat model gaps table.
+  implemented; at the time only the ≥12-char minimum was. Reworded to "as
+  built" vs "backlog." (Composition rules — capital + number + special — were
+  added later; see the 1.0 hardening note below. `zxcvbn`/HIBP remain backlog.)
 - **Verification token.** Described as "signed"; it is actually a random
   token stored as SHA-256. Corrected.
 
@@ -413,6 +414,21 @@ dummy salt is identical before and after a restart — the cross-restart
 ever fails the server falls back to a per-process secret rather than refusing to
 boot. `dummy_hash` intentionally stays per-process (its value never leaves the
 server). Guarded by `enumeration_secret_persists_across_restarts`.
+
+## Post-milestone hardening — master-password strength policy (2026-07)
+
+Added a composition policy for the master password, enforced client-side (the
+only place possible — the server never sees the password): **≥12 characters,
+plus at least one capital letter, one number, and one special character.**
+Applied at **both** registration and recovery, so recovery can't be used to set
+a weaker password. Lives in `desktop_core::check_password_strength`, which
+returns a single message naming every unmet requirement; the setup and recovery
+screens show the rule up front. Guarded by `password::tests`.
+
+Honest scope note: composition rules stop trivially weak inputs but don't catch
+a long-but-breached passphrase. The stronger complements — a Have I Been Pwned
+k-anonymity check and `zxcvbn` entropy scoring — remain backlog (THREAT_MODEL
+gaps), now downgraded to Low since basic strength is enforced.
 
 ## Standing invitation
 

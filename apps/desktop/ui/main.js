@@ -45,6 +45,7 @@ function setMode(m) {
   $("tab-login").classList.toggle("active", m === "login");
   $("tab-register").classList.toggle("active", m === "register");
   $("row-password2").hidden = m !== "register";
+  $("pw-requirements").hidden = m !== "register";
   $("row-totp").hidden = m !== "login";
   $("setup-submit").textContent = m === "login" ? "Log in" : "Create account";
   $("setup-error").textContent = "";
