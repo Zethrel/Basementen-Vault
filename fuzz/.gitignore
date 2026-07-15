@@ -1,0 +1,6 @@
+# cargo-fuzz build output and run artifacts. The seed `corpus/` is committed;
+# fuzzer-discovered corpus growth and crash reproducers are not.
+/target
+/artifacts
+/coverage
+Cargo.lock

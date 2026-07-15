@@ -13,11 +13,32 @@ reaches 1.0.
 
 ## [Unreleased]
 
-Documentation and supply-chain follow-ups from a third review pass, plus a CI
-trigger fix. No code paths in the app or server changed.
+Third review pass: supply-chain gating, a CI-trigger fix, coverage-guided
+fuzzing of the untrusted-input parsers, and one denial-of-service hardening that
+fuzzing motivated.
 
 - **Breaking changes:** None.
-- **Migration required:** No.
+- **Migration required:** No — on-disk / on-the-wire formats unchanged. (The new
+  KDF-parameter ceiling only rejects values far above any real configuration; no
+  existing vault uses them.)
+
+### Security
+
+- **KDF-parameter ceiling (untrusted-input DoS).** `KdfParams::validate()` now
+  enforces an upper bound (≤ 1 GiB memory, ≤ 64 iterations, ≤ 64 lanes) in
+  addition to the OWASP floor. KDF parameters arrive inside untrusted data — an
+  export file's envelope and the server's prelogin/login response — and gate an
+  Argon2 derivation, so an unbounded block could force a multi-gigabyte
+  allocation or multi-minute hash (memory/CPU DoS on import or unlock, including
+  from a malicious server). Surfaced while building the import fuzz target.
+
+### Testing
+
+- **Coverage-guided fuzzing** (`fuzz/`, cargo-fuzz / libFuzzer) of the
+  untrusted-input parsers — `import_csv`, `import_encrypted` (envelope → KDF →
+  AEAD → payload), and `Item::from_plaintext` — with a committed seed corpus and
+  a short CI smoke on every push (`.github/workflows/fuzz.yml`). Complements the
+  existing `proptest` coverage.
 
 ### Supply chain
 

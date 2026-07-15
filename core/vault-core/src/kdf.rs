@@ -12,6 +12,17 @@ pub const MIN_MEMORY_KIB: u32 = 19 * 1024;
 pub const MIN_ITERATIONS: u32 = 2;
 pub const MIN_PARALLELISM: u32 = 1;
 
+/// Upper ceilings. Params travel *inside* untrusted data (an export file's
+/// envelope, a prelogin response), and `validate()` gates every derivation, so
+/// without a ceiling a crafted `KdfParams` could drive Argon2 into a
+/// multi-gigabyte allocation or a multi-minute hash — a memory/CPU
+/// denial-of-service on import or unlock. These bounds leave generous headroom
+/// over any real configuration (desktop is 64 MiB / t=3 / p=4) while capping the
+/// worst case at ~1 GiB and a bounded iteration/lane count.
+pub const MAX_MEMORY_KIB: u32 = 1024 * 1024; // 1 GiB
+pub const MAX_ITERATIONS: u32 = 64;
+pub const MAX_PARALLELISM: u32 = 64;
+
 /// Length of the per-account KDF salt (128 bits).
 pub const SALT_LEN: usize = 16;
 
@@ -58,6 +69,16 @@ impl KdfParams {
         {
             return Err(CryptoError::InvalidKdfParams(format!(
                 "below security floor (m>={MIN_MEMORY_KIB} KiB, t>={MIN_ITERATIONS}, p>={MIN_PARALLELISM})"
+            )));
+        }
+        // Ceiling: params ride inside untrusted data, so reject values that would
+        // turn a derivation into a memory/CPU denial-of-service.
+        if self.memory_kib > MAX_MEMORY_KIB
+            || self.iterations > MAX_ITERATIONS
+            || self.parallelism > MAX_PARALLELISM
+        {
+            return Err(CryptoError::InvalidKdfParams(format!(
+                "above safe ceiling (m<={MAX_MEMORY_KIB} KiB, t<={MAX_ITERATIONS}, p<={MAX_PARALLELISM})"
             )));
         }
         Ok(())
@@ -120,4 +141,54 @@ pub fn derive_master_key(
         .map_err(|_| CryptoError::KeyDerivation)?;
 
     Ok(MasterKey::from_bytes(*out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_recommended_and_floor_params() {
+        assert!(KdfParams::desktop().validate().is_ok());
+        assert!(KdfParams::mobile_floor().validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_params_below_the_floor() {
+        let mut p = KdfParams::desktop();
+        p.memory_kib = MIN_MEMORY_KIB - 1;
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_params_above_the_ceiling() {
+        // A crafted export/prelogin block must not be able to request a
+        // multi-gigabyte / runaway Argon2 derivation (memory/CPU DoS).
+        let mut p = KdfParams::desktop();
+        p.memory_kib = MAX_MEMORY_KIB + 1;
+        assert!(p.validate().is_err(), "over-large memory must be rejected");
+
+        let mut p = KdfParams::desktop();
+        p.iterations = MAX_ITERATIONS + 1;
+        assert!(
+            p.validate().is_err(),
+            "over-large iterations must be rejected"
+        );
+
+        let mut p = KdfParams::desktop();
+        p.parallelism = MAX_PARALLELISM + 1;
+        assert!(
+            p.validate().is_err(),
+            "over-large parallelism must be rejected"
+        );
+
+        // The exact ceiling is still accepted.
+        let p = KdfParams {
+            version: 1,
+            memory_kib: MAX_MEMORY_KIB,
+            iterations: MAX_ITERATIONS,
+            parallelism: MAX_PARALLELISM,
+        };
+        assert!(p.validate().is_ok(), "the ceiling itself is valid");
+    }
 }

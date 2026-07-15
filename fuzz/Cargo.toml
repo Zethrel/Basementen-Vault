@@ -1,0 +1,47 @@
+[package]
+name = "basementen-vault-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# The untrusted-input parsers under test.
+desktop-core = { path = "../apps/desktop-core" }
+vault-core = { path = "../core/vault-core" }
+
+[[bin]]
+name = "import_csv"
+path = "fuzz_targets/import_csv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "import_encrypted"
+path = "fuzz_targets/import_encrypted.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "item_from_plaintext"
+path = "fuzz_targets/item_from_plaintext.rs"
+test = false
+doc = false
+bench = false
+
+# Detach from the parent workspace: cargo-fuzz targets need a nightly toolchain
+# and the libFuzzer runtime, and must never be pulled into the stable
+# `cargo build --workspace` / `cargo test --workspace` used by CI.
+[workspace]
+
+# Fuzzing wants an optimized build with debug assertions (catch overflow /
+# invariant panics) and symbols for readable crash reports.
+[profile.release]
+debug = 1
+debug-assertions = true
+overflow-checks = true

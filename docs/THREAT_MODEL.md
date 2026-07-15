@@ -237,6 +237,20 @@ fields are name / username / URL / cardholder / tags only — **passwords and
 card numbers are deliberately excluded** from the match set. The decrypted
 `Item`s follow the in-memory lifetime and scrubbing described below.
 
+**Untrusted-parser hardening.** The parsers that ingest attacker- or
+corruption-controlled bytes — CSV import, the encrypted-export decode chain, and
+decrypted-item JSON — are exercised by coverage-guided fuzz targets (`fuzz/`,
+cargo-fuzz / libFuzzer; a short smoke runs in CI on every push), so a panic /
+hang / OOM on hostile input is caught as a crash. One concrete hardening came
+out of this: `KdfParams::validate()` now enforces an **upper ceiling** (≤ 1 GiB
+memory, bounded iterations/lanes), not just the OWASP floor. KDF parameters ride
+*inside* untrusted data — an export file's envelope and the server's
+prelogin/login response — and gate an Argon2 derivation, so without a ceiling a
+crafted `kdf_params` block could force a multi-gigabyte allocation or a
+multi-minute hash: a memory/CPU denial-of-service on import or unlock, including
+one a **malicious server** could aim at a client. Real configurations
+(desktop 64 MiB / t=3 / p=4) sit far below the cap.
+
 **Memory-protection posture (as built, with honest limits).** What we do:
 key types are zeroize-on-drop *and* **page-locked** (`mlock`/`VirtualLock`),
 transient plaintext uses `Zeroizing`, dropping the session on lock/auto-lock

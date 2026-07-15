@@ -1,0 +1,1 @@
+{"format":"basementen-vault-export","version":1,"kdf_params":{"version":1,"memory_kib":19456,"iterations":2,"parallelism":1},"salt":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"nonce":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"ciphertext":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]}
