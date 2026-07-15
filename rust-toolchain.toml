@@ -1,0 +1,10 @@
+# Pin the exact Rust toolchain so CI, the release build, and anyone reproducing
+# a release all compile with the *same* rustc — a prerequisite for reproducible
+# builds (a floating `stable` silently changes codegen between builds). Bump this
+# deliberately, and note the bump in CHANGELOG, rather than drifting.
+#
+# Keep in sync with the `rust:<version>` base image in `server/Dockerfile`.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

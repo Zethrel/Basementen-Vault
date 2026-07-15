@@ -32,6 +32,22 @@ fuzzing motivated.
   allocation or multi-minute hash (memory/CPU DoS on import or unlock, including
   from a malicious server). Surfaced while building the import fuzz target.
 
+### Build & release tooling
+
+- **Build-provenance attestations** (SLSA, `actions/attest-build-provenance`):
+  the release workflow now signs every desktop bundle and the server image,
+  binding each to its source commit and workflow. Anyone can verify an artifact
+  was built from published source with `gh attestation verify` — the primary
+  answer to "do these binaries correspond to the source?" See
+  `docs/REPRODUCIBLE_BUILDS.md`.
+- **Pinned Rust toolchain** (`rust-toolchain.toml` → the exact `rustc`/`cargo`
+  version), used by CI, the release workflow, and the server `Dockerfile` (now
+  an exact patch base image). A prerequisite for reproducible builds — a
+  floating `stable` silently changes codegen between builds.
+- **`docs/REPRODUCIBLE_BUILDS.md`**: verification instructions and an honest
+  reproducibility status matrix (library crates: yes; server image: targeted;
+  desktop GUI bundles: not yet — provenance is their verification path).
+
 ### Testing
 
 - **Coverage-guided fuzzing** (`fuzz/`, cargo-fuzz / libFuzzer) of the

@@ -21,8 +21,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev
-      - uses: dtolnay/rust-toolchain@stable
+      # Version comes from rust-toolchain.toml (single source of truth); pinned
+      # here too so the components install against the right toolchain.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.94.1"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Format
