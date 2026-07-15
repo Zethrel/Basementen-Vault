@@ -29,7 +29,20 @@ pub enum Mailer {
 impl Mailer {
     pub fn from_config(cfg: &MailConfig) -> Result<Self, String> {
         match cfg {
-            MailConfig::Console => Ok(Mailer::Console),
+            MailConfig::Console => {
+                // The console mailer writes full e-mail bodies — including
+                // verification and account-recovery links — to the server log.
+                // That is the point (it is how an operator without SMTP reads
+                // the link), but those links are sensitive, so make the
+                // tradeoff loud instead of silent. Configure `BV_MAILER=smtp`
+                // for any deployment whose logs are shipped or shared.
+                tracing::warn!(
+                    "console mailer active: verification and recovery links are \
+                     written to the server log — do not use with exported/shared \
+                     logs; set BV_MAILER=smtp for real delivery"
+                );
+                Ok(Mailer::Console)
+            }
             MailConfig::Smtp {
                 host,
                 port,

@@ -13,6 +13,28 @@ reaches 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **Master-password policy follows NIST SP 800-63B.** Dropped the composition
+  requirements (a capital, a number, a special character) in favour of a higher
+  length floor (**14 characters**) plus the existing zxcvbn guessability bar
+  (score ≥ 3). Composition rules rejected strong passphrases like
+  `correct horse battery staple` while doing little against weak-but-compliant
+  passwords such as `Password123!`; zxcvbn handles the latter far better.
+
+### Security
+
+- **Local replica `secure_delete`.** The desktop SQLite replica now sets
+  `PRAGMA secure_delete = ON`, so freed pages (deleted item ciphertext, rotated
+  wrapped keys) are overwritten rather than left in the file's free list.
+- **Replica file permissions.** On unix the replica database is created `0600`
+  before its WAL sidecars exist (SQLite gives `-wal`/`-shm` the same mode), so
+  other local users can't read it. Defense-in-depth — the file is ciphertext +
+  public metadata regardless.
+- **Console-mailer warning.** The (default) console mailer writes verification
+  and recovery links to the server log; it now logs a loud warning at startup
+  so self-hosters know to switch to `BV_MAILER=smtp` where logs are shared.
+
 ## [1.0.0-beta.2] - 2026-07-15
 
 Packaging fixes only — no changes to crypto, storage, or on-the-wire formats.

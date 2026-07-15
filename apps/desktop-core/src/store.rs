@@ -38,6 +38,20 @@ pub struct AccountMeta {
 impl SqliteVault {
     pub fn open(path: &std::path::Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
+        // Restrict the replica to its owner *before* the WAL sidecars are
+        // created: SQLite gives `-wal`/`-shm` the same permissions as the main
+        // database file. Best-effort defense-in-depth on shared machines — the
+        // file only ever holds ciphertext + public metadata, but there is no
+        // reason for other local users to read it. No-op on non-unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(path, perms);
+            }
+        }
         Self::init(conn)
     }
 
@@ -49,6 +63,9 @@ impl SqliteVault {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
+             -- Overwrite freed pages so deleted ciphertext (e.g. removed items,
+             -- rotated wrapped keys) does not linger in the file's free list.
+             PRAGMA secure_delete = ON;
              CREATE TABLE IF NOT EXISTS meta (
                  key   TEXT PRIMARY KEY,
                  value TEXT NOT NULL
