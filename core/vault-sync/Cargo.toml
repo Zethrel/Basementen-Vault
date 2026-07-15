@@ -1,6 +1,6 @@
 [package]
 name = "vault-sync"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 description = "Offline-first sync engine for Basementen Vault clients: local replica, op queue, delta sync"
 edition.workspace = true
 license.workspace = true

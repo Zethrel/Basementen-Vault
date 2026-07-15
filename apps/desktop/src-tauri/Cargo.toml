@@ -1,6 +1,6 @@
 [package]
 name = "basementen-vault-desktop"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 description = "Basementen Vault desktop app"
 edition.workspace = true
 license.workspace = true
