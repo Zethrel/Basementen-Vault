@@ -1,0 +1,47 @@
+# cargo-deny configuration — supply-chain gate run in CI alongside `cargo audit`.
+#
+# CI runs `cargo deny check advisories bans sources` (see
+# `.github/workflows/ci.yml`). The `licenses` check is configured below but not
+# yet gated in CI; flip it on once the allow-list is confirmed against the full
+# dependency tree, so a first run can't turn CI red on an unreviewed license.
+
+[advisories]
+# RustSec advisory database. This overlaps `cargo audit` deliberately —
+# cargo-deny gives finer control and one place to record any accepted advisory.
+version = 2
+yanked = "deny"
+ignore = []
+
+[bans]
+# A second major version of the same crate sneaking into the tree is worth a
+# look (bloat / duplicate-code risk); wildcard version requirements in our own
+# manifests are forbidden outright (path deps between our crates are exempt).
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# Only the public crates.io registry — no git or unknown-registry sources.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[licenses]
+# Not gated in CI yet (see header). Recorded so the intent is explicit and the
+# allow-list is ready to enable. AGPL-3.0 is our own license; the rest are the
+# permissive licenses expected across the RustCrypto / Tauri / axum stacks.
+version = 2
+confidence-threshold = 0.9
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "Zlib",
+  "MPL-2.0",
+  "AGPL-3.0",
+]

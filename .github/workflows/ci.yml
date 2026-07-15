@@ -1,8 +1,9 @@
 name: CI
 
+# Run on every push (the working branch is the default branch and receives
+# direct commits, so a `main`-only filter would never fire) and on every PR.
 on:
   push:
-    branches: [main]
   pull_request:
 
 env:
@@ -39,3 +40,15 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  deny:
+    name: Supply-chain (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Advisories + banned/duplicate crates + source registries. The `licenses`
+      # check is intentionally left out until its allow-list (deny.toml) is
+      # confirmed against the full tree — see the note in deny.toml.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans sources

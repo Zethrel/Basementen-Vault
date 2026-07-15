@@ -216,6 +216,27 @@ under the vault key. Unlocking requires the master password (Argon2id at
 desktop parameters). Auto-lock (15 min idle) zeroizes keys in memory;
 clipboard auto-clears 30 s after copying a secret.
 
+**On-disk residuals and `secure_delete` (honest limits).** The replica opens
+with `PRAGMA secure_delete = ON`, so pages freed by a delete/rewrite (removed
+items, rotated wrapped keys) are overwritten in the database file rather than
+left in its free list. On unix the DB is created `0600` (its WAL/SHM sidecars
+inherit the mode) so other local users can't read it. Both are
+defense-in-depth: everything in the file is already ciphertext + public
+metadata, so a residual page leaks ciphertext, not secrets. `secure_delete`
+does **not** make data unrecoverable — it does not reach WAL/SHM history,
+filesystem or volume snapshots, OS/Time-Machine backups, or blocks the SSD
+controller has copied elsewhere via wear-levelling. It carries a small write
+amplification cost (extra overwrite on free), negligible for a vault-sized DB.
+For true erasure of the underlying media, users must rely on full-disk
+encryption + secure wipe, which is out of the app's control.
+
+**Client-side search touches no plaintext on disk.** Search runs in memory
+over already-decrypted `Item` structs; there is **no persistent plaintext
+search index** and nothing decrypted is written back to disk. The searchable
+fields are name / username / URL / cardholder / tags only — **passwords and
+card numbers are deliberately excluded** from the match set. The decrypted
+`Item`s follow the in-memory lifetime and scrubbing described below.
+
 **Memory-protection posture (as built, with honest limits).** What we do:
 key types are zeroize-on-drop *and* **page-locked** (`mlock`/`VirtualLock`),
 transient plaintext uses `Zeroizing`, dropping the session on lock/auto-lock
@@ -278,8 +299,19 @@ window; it does not close it against a live attacker on the device.
 ### A7 — Supply chain
 
 Crypto is confined to audited RustCrypto crates; `unsafe_code = "forbid"`
-workspace-wide; RustSec `cargo audit` in CI; `Cargo.lock` committed; no
-frontend package dependencies at all (plain JS, CSP `default-src 'self'`).
+workspace-wide; RustSec `cargo audit` **and** `cargo deny`
+(advisories + banned/duplicate crates + source-registry allow-list) both run in
+CI on every push; `Cargo.lock` committed; no frontend package dependencies at
+all (plain JS, CSP `default-src 'self'`).
+
+**No telemetry.** The client and server contain no analytics, crash-reporting,
+or phone-home code — there is nothing that transmits usage data or panic
+contents off the device. The only outbound calls the client makes are to the
+user's own sync server and (opt-in, k-anonymised) the HIBP range API. A panic
+unwinds through the drop-based scrub (§A6); panic messages are not constructed
+from secret material, and core dumps are suppressed at startup, so a crash does
+not spill secrets to logs or dump files (Windows crash dumps excepted — operator
+-disabled, per §A6 and the RUNBOOK).
 
 Our own code contains no `unsafe`. The one operation that inherently needs a
 raw syscall — locking key pages out of swap (`mlock`/`VirtualLock`) — is

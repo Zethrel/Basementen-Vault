@@ -13,10 +13,43 @@ reaches 1.0.
 
 ## [Unreleased]
 
+Documentation and supply-chain follow-ups from a third review pass, plus a CI
+trigger fix. No code paths in the app or server changed.
+
+- **Breaking changes:** None.
+- **Migration required:** No.
+
+### Supply chain
+
+- **`cargo deny` in CI**, alongside the existing `cargo audit`: checks security
+  advisories, banned/duplicate crates, and the source-registry allow-list
+  (`deny.toml`) on every push. The license gate is configured but not yet
+  enforced (allow-list pending a full-tree review — noted in `deny.toml`).
+- **Fixed the CI trigger.** `ci.yml` fired only on push to `main`, but the
+  working branch is the default branch and takes direct commits — so fmt,
+  clippy, tests, and `cargo audit` had not been running automatically. CI now
+  runs on every push and pull request.
+
+### Documentation
+
+- Documented `secure_delete`'s **limits** (no reach into WAL/SHM history,
+  filesystem/volume snapshots, backups, or SSD wear-levelled blocks) and its
+  minor write-amplification cost — so "secure delete" is not mistaken for
+  unrecoverable erasure (`THREAT_MODEL` §A6).
+- Documented that **client-side search touches no plaintext on disk**: it runs
+  in memory over decrypted items, keeps no persistent search index, and
+  excludes passwords and card numbers from the searchable fields (§A6).
+- Stated the **no-telemetry** posture explicitly: no analytics, crash
+  reporting, or phone-home; panic messages aren't built from secrets and core
+  dumps are suppressed (§A7).
+
 ## [1.0.0-beta.3] - 2026-07-15
 
-Follow-up hardening from a second external review pass. No changes to the
-on-disk or on-the-wire formats; existing vaults are unaffected.
+Follow-up hardening from a second external review pass.
+
+- **Breaking changes:** None.
+- **Migration required:** No — on-disk and on-the-wire formats are unchanged;
+  existing vaults are unaffected.
 
 ### Changed
 
