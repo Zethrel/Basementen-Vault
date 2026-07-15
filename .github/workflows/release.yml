@@ -1,4 +1,6 @@
-# Release build: triggered by pushing a version tag (e.g. `v1.0.0`).
+# Release build: triggered by pushing a version tag (e.g. `v1.0.0`), or by a
+# manual `workflow_dispatch` with the tag as input (the fallback when a tag
+# can't be pushed directly). Either way a matching tag + draft release is made.
 #
 # Produces a DRAFT GitHub Release with desktop bundles for macOS / Linux /
 # Windows, a SHA256SUMS file, and pushes a multi-arch server image to GHCR.
@@ -14,6 +16,15 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  # Manual fallback for when a tag can't be pushed directly (e.g. a
+  # branch-scoped push proxy). `tauri-action` creates the tag + draft release
+  # at the dispatched commit, so the result is identical to a tag push.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to release, e.g. v1.0.0-beta.2 (must match the version in Cargo.toml / tauri.conf.json)"
+        required: true
+        type: string
 
 permissions:
   contents: write # create the release + upload assets
@@ -23,8 +34,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Resolve the release tag once so every job agrees on it whether the run
+  # came from a tag push (`github.ref_name`) or a manual dispatch (`inputs.tag`).
+  resolve:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.r.outputs.tag }}
+    steps:
+      - id: r
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+          case "$tag" in
+            v*.*.*) ;;
+            *) echo "::error::tag '$tag' must look like vMAJOR.MINOR.PATCH"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag"
+
   desktop:
     name: Desktop bundle (${{ matrix.platform }})
+    needs: resolve
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -72,10 +106,10 @@ jobs:
           #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: "Basementen Vault ${{ github.ref_name }}"
+          tagName: ${{ needs.resolve.outputs.tag }}
+          releaseName: "Basementen Vault ${{ needs.resolve.outputs.tag }}"
           releaseBody: |
-            Desktop builds for ${{ github.ref_name }}. See CHANGELOG.md.
+            Desktop builds for ${{ needs.resolve.outputs.tag }}. See CHANGELOG.md.
 
             **Unaudited beta** — verify `SHA256SUMS` before installing, and do not
             store irreplaceable secrets until an independent security audit is done.
@@ -85,6 +119,7 @@ jobs:
 
   server-image:
     name: Server image (multi-arch)
+    needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,9 +143,11 @@ jobs:
           images: ${{ steps.img.outputs.name }}
           # Version tags only. `:latest` is intentionally not moved here — retag
           # it by hand after end-to-end verification (RELEASE_CHECKLIST §7).
+          # `value=` feeds the resolved tag explicitly so this works for a
+          # manual dispatch too (no git tag ref to read from).
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.resolve.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.resolve.outputs.tag }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -125,15 +162,16 @@ jobs:
 
   checksums:
     name: Publish SHA256SUMS
-    needs: desktop
+    needs: [resolve, desktop]
     runs-on: ubuntu-latest
     steps:
       - name: Download the draft release's assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           mkdir -p dist
-          gh release download "${GITHUB_REF_NAME}" \
+          gh release download "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" --dir dist --pattern '*'
 
       - name: Generate SHA256SUMS
@@ -147,6 +185,7 @@ jobs:
       - name: Upload SHA256SUMS to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" dist/SHA256SUMS \
+          gh release upload "${TAG}" dist/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" --clobber
