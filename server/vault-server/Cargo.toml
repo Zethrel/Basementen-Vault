@@ -1,6 +1,6 @@
 [package]
 name = "vault-server"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 description = "Self-hostable API server for Basementen Vault: accounts, auth, MFA, encrypted key storage"
 edition.workspace = true
 license.workspace = true
