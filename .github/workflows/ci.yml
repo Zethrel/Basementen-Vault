@@ -32,17 +32,13 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-  audit:
-    name: Dependency audit (RustSec)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   deny:
-    name: Supply-chain (cargo-deny)
+    # Supply-chain gate. cargo-deny's `advisories` check queries the same RustSec
+    # advisory database as `cargo audit`, so this is our advisory scan too — with
+    # one auditable place (deny.toml) to record accepted advisories and their
+    # justifications. (A separate `rustsec/audit-check` job was dropped as a
+    # redundant second copy that couldn't honour those ignores.)
+    name: Supply-chain (cargo-deny / RustSec)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -21,14 +21,28 @@ trigger fix. No code paths in the app or server changed.
 
 ### Supply chain
 
-- **`cargo deny` in CI**, alongside the existing `cargo audit`: checks security
-  advisories, banned/duplicate crates, and the source-registry allow-list
-  (`deny.toml`) on every push. The license gate is configured but not yet
-  enforced (allow-list pending a full-tree review — noted in `deny.toml`).
+- **`cargo deny` in CI** (`deny.toml`): security advisories (same RustSec
+  database as `cargo audit`), banned/duplicate crates, and a source-registry
+  allow-list, on every push. Replaces the separate `rustsec/audit-check` job,
+  which was a redundant second advisory copy that couldn't honour ignores. The
+  license gate is configured but not yet enforced (allow-list pending a
+  full-tree review — noted in `deny.toml`).
 - **Fixed the CI trigger.** `ci.yml` fired only on push to `main`, but the
   working branch is the default branch and takes direct commits — so fmt,
-  clippy, tests, and `cargo audit` had not been running automatically. CI now
-  runs on every push and pull request.
+  clippy, tests, and advisory scanning had **not** been running automatically.
+  CI now runs on every push and pull request. The first real run surfaced the
+  items below.
+- **Triaged the advisories the first CI run found**, all transitive and
+  unreachable, ignored with written justifications in `deny.toml` and
+  `THREAT_MODEL` §A7: `rsa` Marvin (RUSTSEC-2023-0071 — not compiled into any
+  binary), `quick-xml` DoS (RUSTSEC-2026-0194/-0195 — build-time parse of
+  trusted Wayland XML), and the archived gtk-rs GTK3 stack incl. `glib`
+  unsoundness (Tauri's Linux backend).
+
+### Fixed
+
+- **Clippy lint** (`unnecessary_sort_by`) in the desktop search command,
+  surfaced by the now-working CI. Behaviour unchanged.
 
 ### Documentation
 

@@ -322,7 +322,7 @@ async fn list_items(ctx: Ctx<'_>, query: String) -> Result<Vec<ItemSummary>, Str
                 out.push(ItemSummary::of(&stored.item_id, &item));
             }
         }
-        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out.sort_by_key(|a| a.name.to_lowercase());
         Ok(out)
     })
     .await

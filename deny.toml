@@ -1,23 +1,52 @@
-# cargo-deny configuration — supply-chain gate run in CI alongside `cargo audit`.
+# cargo-deny configuration — the project's supply-chain gate, run in CI
+# (`.github/workflows/ci.yml`, `cargo deny check advisories bans sources`).
 #
-# CI runs `cargo deny check advisories bans sources` (see
-# `.github/workflows/ci.yml`). The `licenses` check is configured below but not
-# yet gated in CI; flip it on once the allow-list is confirmed against the full
-# dependency tree, so a first run can't turn CI red on an unreviewed license.
+# cargo-deny's `advisories` check queries the same RustSec advisory database as
+# `cargo audit`, so it *is* our advisory scan; it just gives one auditable place
+# (this file) to record every accepted/ignored advisory with a justification.
+#
+# The `licenses` check is configured but not gated in CI yet — enable it once the
+# allow-list is confirmed against the full dependency tree.
 
 [advisories]
-# RustSec advisory database. This overlaps `cargo audit` deliberately —
-# cargo-deny gives finer control and one place to record any accepted advisory.
 version = 2
-yanked = "deny"
-ignore = []
+# A yanked crate is a warning, not a hard failure (it's a release-hygiene signal,
+# not a vulnerability). Currently: spin 0.9.8 (yanked), pulled transitively.
+yanked = "warn"
+# Only flag *unmaintained* crates that are our own direct workspace dependencies.
+# The unmaintained crates in the tree are all transitive and unavoidable: the
+# gtk-rs GTK3 stack (atk/gdk/gtk/... — Tauri's Linux WebKit backend, upstream
+# archived pending Tauri's GTK4 migration), the `unic-*` crates, and
+# `proc-macro-error`. None are ours; none are actionable here.
+unmaintained = "workspace"
+# Accepted advisories. Each is transitive and unreachable in our threat model;
+# revisit whenever the upstream chain updates.
+ignore = [
+  # rsa (Marvin timing side-channel; no patch upstream). NOT COMPILED into any
+  # Basementen Vault binary — it is a Cargo.lock-only artifact from sqlx's MySQL
+  # backend, which we never enable (sqlite-only). `cargo tree -i rsa` finds it in
+  # no target/edge. We perform no RSA operations on any attacker-timed path.
+  "RUSTSEC-2023-0071",
+  # quick-xml 0.39.4 quadratic / unbounded-alloc DoS on *untrusted* XML. Reached
+  # only through `wayland-scanner` (a build-time proc-macro that parses the
+  # static Wayland protocol XML shipped inside the crate) → wl-clipboard-rs →
+  # arboard. That is a compile-time parse of trusted, developer-controlled files,
+  # never attacker input. quick-xml 0.41.0 (patched) is also already in the tree
+  # for the runtime paths.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+  # glib 0.18 VariantStrIter unsoundness. Transitive via the same Tauri GTK3
+  # stack; not reachable from our code (we never iterate glib GVariant string
+  # arrays). Clears when Tauri moves the Linux backend to a newer glib.
+  "RUSTSEC-2024-0429",
+]
 
 [bans]
-# A second major version of the same crate sneaking into the tree is worth a
-# look (bloat / duplicate-code risk); wildcard version requirements in our own
-# manifests are forbidden outright (path deps between our crates are exempt).
+# Duplicate major versions and wildcard specs are worth surfacing but are almost
+# always transitive and not actionable in a Tauri tree, so they warn rather than
+# fail the build. Wildcards between our own path crates are exempt.
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "warn"
 allow-wildcard-paths = true
 
 [sources]

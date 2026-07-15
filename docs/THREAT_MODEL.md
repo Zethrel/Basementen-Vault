@@ -299,10 +299,30 @@ window; it does not close it against a live attacker on the device.
 ### A7 — Supply chain
 
 Crypto is confined to audited RustCrypto crates; `unsafe_code = "forbid"`
-workspace-wide; RustSec `cargo audit` **and** `cargo deny`
-(advisories + banned/duplicate crates + source-registry allow-list) both run in
-CI on every push; `Cargo.lock` committed; no frontend package dependencies at
-all (plain JS, CSP `default-src 'self'`).
+workspace-wide; **`cargo deny`** runs in CI on every push — its `advisories`
+check queries the same RustSec database as `cargo audit` (so it is our advisory
+scan) plus banned/duplicate-crate and source-registry gates; `Cargo.lock`
+committed; no frontend package dependencies at all (plain JS, CSP
+`default-src 'self'`).
+
+**Accepted transitive advisories (tracked in `deny.toml`, each justified).**
+All are transitive and unreachable in our threat model, so they are ignored with
+a written rationale rather than left to fail silently:
+
+- `rsa` **RUSTSEC-2023-0071** (Marvin timing side-channel, no upstream patch) —
+  **not compiled into any binary**; it is a `Cargo.lock`-only artifact from
+  sqlx's MySQL backend, which we never enable (sqlite-only). We perform no RSA
+  operations on any attacker-timed path.
+- `quick-xml` 0.39 **RUSTSEC-2026-0194 / -0195** (DoS on *untrusted* XML) —
+  reached only via `wayland-scanner`, a build-time proc-macro that parses the
+  static Wayland-protocol XML shipped inside the crate (trusted, developer-
+  controlled, compile-time), never attacker input.
+- `glib` 0.18 **RUSTSEC-2024-0429** (unsound `VariantStrIter`) and the archived
+  gtk-rs **GTK3** binding set (unmaintained) — Tauri's Linux WebKit backend,
+  upstream-archived pending Tauri's GTK4 migration; not reachable from our code.
+
+These clear as the Tauri Linux stack updates; the ignore list is reviewed each
+time the dependency tree changes.
 
 **No telemetry.** The client and server contain no analytics, crash-reporting,
 or phone-home code — there is nothing that transmits usage data or panic
