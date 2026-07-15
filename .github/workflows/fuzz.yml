@@ -12,13 +12,21 @@ jobs:
   smoke:
     name: Fuzz smoke (parsers)
     runs-on: ubuntu-latest
-    # cargo-fuzz injects its own sanitizer RUSTFLAGS; don't let the repo-wide
-    # `-D warnings` (registry deps are cap-lints'd anyway) interfere.
     env:
+      # cargo-fuzz injects its own sanitizer RUSTFLAGS; don't let the repo-wide
+      # `-D warnings` (registry deps are cap-lints'd anyway) interfere.
       RUSTFLAGS: ""
+      # Force the GNU host triple. `taiki-e/install-action` ships a musl-built
+      # cargo-fuzz, and cargo-fuzz otherwise defaults the fuzz build to its own
+      # (musl) triple — but musl statically links libc, which AddressSanitizer
+      # rejects ("sanitizer is incompatible with statically linked libc"). GNU
+      # has a dynamic libc and is the runner's native target.
+      FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-unknown-linux-gnu
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
@@ -27,14 +35,14 @@ jobs:
           workspaces: fuzz
       - name: Build fuzz targets
         working-directory: fuzz
-        run: cargo +nightly fuzz build
+        run: cargo +nightly fuzz build --target "$FUZZ_TARGET_TRIPLE"
       - name: Smoke-run each target
         working-directory: fuzz
         run: |
           set -euo pipefail
           for target in import_csv import_encrypted item_from_plaintext; do
             echo "::group::fuzz $target"
-            cargo +nightly fuzz run "$target" -- \
+            cargo +nightly fuzz run "$target" --target "$FUZZ_TARGET_TRIPLE" -- \
               -max_total_time=30 -rss_limit_mb=4096
             echo "::endgroup::"
           done
