@@ -1,6 +1,6 @@
 [package]
 name = "desktop-core"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 description = "Desktop client core for Basementen Vault: local replica, API client, session, generator"
 edition.workspace = true
 license.workspace = true

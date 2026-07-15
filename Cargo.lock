@@ -257,7 +257,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "basementen-vault-desktop"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "desktop-core",
  "serde",
@@ -956,7 +956,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-core"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -5573,7 +5573,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vault-core"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -5594,7 +5594,7 @@ dependencies = [
 
 [[package]]
 name = "vault-server"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "argon2",
  "async-stream",
@@ -5622,7 +5622,7 @@ dependencies = [
 
 [[package]]
 name = "vault-sync"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "axum",
  "base64 0.22.1",
