@@ -2,7 +2,7 @@
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};

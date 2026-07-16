@@ -1,5 +1,5 @@
 use argon2::{Algorithm, Argon2, Params, Version};
-use rand_core::{OsRng, RngCore};
+
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -104,7 +104,7 @@ pub fn normalize_email(email: &str) -> String {
 /// the account e-mail change freely. See `docs/CRYPTOGRAPHIC_INVARIANTS.md`.
 pub fn generate_salt() -> [u8; SALT_LEN] {
     let mut salt = [0u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    getrandom::fill(&mut salt).expect("OS CSPRNG failure");
     salt
 }
 

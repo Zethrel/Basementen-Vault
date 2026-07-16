@@ -116,7 +116,8 @@ fn server_known_credential_cannot_decrypt_vault_key() {
     let reg = account::register(PASSWORD, params()).unwrap();
     let wrapped = &reg.bundle.master_wrapped_vault_key;
 
-    let evil = XChaCha20Poly1305::new((&reg.bundle.auth_credential).into());
+    let evil = XChaCha20Poly1305::new_from_slice(&reg.bundle.auth_credential)
+        .expect("credential is 32 bytes");
     let attempt = evil.decrypt(
         &XNonce::from(wrapped.nonce),
         Payload {

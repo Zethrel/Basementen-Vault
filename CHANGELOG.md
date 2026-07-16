@@ -13,6 +13,23 @@ reaches 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **Coordinated RustCrypto generation migration** (the change the closed
+  Dependabot PRs #8/#9/#11/#15 attempted one-by-one): `sha2` 0.10→0.11, `sha1`
+  0.10→0.11, `hmac` 0.12→0.13, `hkdf` 0.12→0.13, `chacha20poly1305` 0.10→0.11
+  (`digest` 0.11 / `crypto-common` 0.2 / `hybrid-array` base), migrated together
+  because the shared traits make individual bumps uncompilable. Code changes are
+  API-shape only (nonce generation via the new `Generate` trait, cipher
+  construction via `new_from_slice`, OS randomness via `getrandom` directly);
+  **algorithms, key derivation, and all on-disk / on-the-wire formats are
+  unchanged** — v1/v2 ciphertext round-trip and AAD version-binding tests prove
+  existing vaults decrypt as before.
+- **`argon2` deliberately stays at 0.5**: the new-generation `argon2` is still a
+  release candidate (`0.6.0-rc.x`), and the KDF of a password vault does not
+  ride on RCs. Its internal `digest` 0.10 coexists as a duplicate-version
+  (tolerated by `deny.toml`); revisit when 0.6.0 finalizes.
+
 ### Build & release tooling
 
 - **Dependabot** (`.github/dependabot.yml`): weekly dependency-update PRs for

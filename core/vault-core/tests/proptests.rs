@@ -155,13 +155,11 @@ fn encrypt_with_params(plaintext: &[u8], passphrase: &str, params: KdfParams) ->
     // params the envelope declares — so build the envelope via the same code
     // path with substituted params using a tiny local re-implementation
     // guarded by the round-trip assertion in the property above.
-    use chacha20poly1305::aead::{Aead, Payload};
-    use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305};
-    use rand::rngs::OsRng as ROsRng;
-    use rand::RngCore;
+    use chacha20poly1305::aead::{Aead, Generate, Payload};
+    use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 
     let mut salt = [0u8; 16];
-    ROsRng.fill_bytes(&mut salt);
+    getrandom::fill(&mut salt).expect("OS CSPRNG failure");
     let argon = argon2::Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
@@ -177,8 +175,8 @@ fn encrypt_with_params(plaintext: &[u8], passphrase: &str, params: KdfParams) ->
     argon
         .hash_password_into(passphrase.as_bytes(), &salt, &mut key)
         .unwrap();
-    let cipher = XChaCha20Poly1305::new((&key).into());
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut ROsRng);
+    let cipher = XChaCha20Poly1305::new_from_slice(&key).expect("key is 32 bytes");
+    let nonce = XNonce::generate();
     // Must match `export::export_aad(1)` = context || version_le.
     let mut aad = b"basementen-vault/export".to_vec();
     aad.extend_from_slice(&1u16.to_le_bytes());

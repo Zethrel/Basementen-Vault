@@ -1,6 +1,7 @@
+use chacha20poly1305::aead::Generate;
 use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305, XNonce};
-use rand_core::OsRng;
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::CryptoError;
@@ -49,8 +50,8 @@ fn wrap_aad(version: u16, purpose: WrapPurpose) -> Vec<u8> {
 }
 
 fn wrap(key_bytes: &[u8; KEY_LEN], vk: &VaultKey, purpose: WrapPurpose) -> WrappedKey {
-    let cipher = XChaCha20Poly1305::new(key_bytes.into());
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let cipher = XChaCha20Poly1305::new_from_slice(key_bytes).expect("key is KEY_LEN bytes");
+    let nonce = XNonce::generate();
     let ciphertext = cipher
         .encrypt(
             &nonce,
@@ -79,7 +80,7 @@ fn unwrap(
     if wrapped.purpose != expected {
         return Err(CryptoError::Malformed("wrap purpose mismatch".into()));
     }
-    let cipher = XChaCha20Poly1305::new(key_bytes.into());
+    let cipher = XChaCha20Poly1305::new_from_slice(key_bytes).expect("key is KEY_LEN bytes");
     let nonce = XNonce::from(wrapped.nonce);
     let plaintext = cipher
         .decrypt(

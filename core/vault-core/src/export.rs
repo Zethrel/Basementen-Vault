@@ -7,9 +7,10 @@
 //! must not be linkable to accounts), an XChaCha20-Poly1305 nonce, and the
 //! ciphertext of whatever payload the caller serialized.
 
+use chacha20poly1305::aead::Generate;
 use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305, XNonce};
-use rand_core::{OsRng, RngCore};
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -71,11 +72,11 @@ fn derive_export_key(
 pub fn encrypt_export(plaintext: &[u8], passphrase: &str) -> Result<ExportEnvelope, CryptoError> {
     let params = KdfParams::desktop();
     let mut salt = [0u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    getrandom::fill(&mut salt).expect("OS CSPRNG failure");
     let key = derive_export_key(passphrase, &salt, &params)?;
 
-    let cipher = XChaCha20Poly1305::new(key.as_ref().into());
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let cipher = XChaCha20Poly1305::new_from_slice(key.as_ref()).expect("key is 32 bytes");
+    let nonce = XNonce::generate();
     let ciphertext = cipher
         .encrypt(
             &nonce,
@@ -105,7 +106,7 @@ pub fn decrypt_export(
         return Err(CryptoError::UnsupportedVersion(envelope.version));
     }
     let key = derive_export_key(passphrase, &envelope.salt, &envelope.kdf_params)?;
-    let cipher = XChaCha20Poly1305::new(key.as_ref().into());
+    let cipher = XChaCha20Poly1305::new_from_slice(key.as_ref()).expect("key is 32 bytes");
     let plaintext = cipher
         .decrypt(
             &XNonce::from(envelope.nonce),

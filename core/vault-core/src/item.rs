@@ -1,6 +1,7 @@
+use chacha20poly1305::aead::Generate;
 use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305, XNonce};
-use rand_core::OsRng;
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -99,8 +100,9 @@ impl VaultKey {
         plaintext: &[u8],
     ) -> Result<EncryptedItem, CryptoError> {
         let padded = pad_plaintext(plaintext)?;
-        let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let cipher =
+            XChaCha20Poly1305::new_from_slice(self.as_bytes()).expect("key is KEY_LEN bytes");
+        let nonce = XNonce::generate();
         let ciphertext = cipher
             .encrypt(
                 &nonce,
@@ -131,7 +133,8 @@ impl VaultKey {
         if !matches!(item.version, 1 | 2) {
             return Err(CryptoError::UnsupportedVersion(item.version));
         }
-        let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
+        let cipher =
+            XChaCha20Poly1305::new_from_slice(self.as_bytes()).expect("key is KEY_LEN bytes");
         let nonce = XNonce::from(item.nonce);
         let plain = Zeroizing::new(
             cipher
@@ -154,8 +157,9 @@ impl VaultKey {
     /// code always writes v2, but we must prove old records still decrypt.
     #[cfg(test)]
     fn encrypt_item_v1(&self, item_id: &str, revision: u64, plaintext: &[u8]) -> EncryptedItem {
-        let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let cipher =
+            XChaCha20Poly1305::new_from_slice(self.as_bytes()).expect("key is KEY_LEN bytes");
+        let nonce = XNonce::generate();
         let ciphertext = cipher
             .encrypt(
                 &nonce,

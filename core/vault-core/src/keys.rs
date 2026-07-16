@@ -1,5 +1,5 @@
 use hkdf::Hkdf;
-use rand_core::{OsRng, RngCore};
+
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
@@ -111,7 +111,7 @@ impl VaultKey {
     /// Generate a fresh random Vault Key from the OS CSPRNG.
     pub fn generate() -> Self {
         let mut bytes = [0u8; KEY_LEN];
-        OsRng.fill_bytes(&mut bytes);
+        getrandom::fill(&mut bytes).expect("OS CSPRNG failure");
         let key = Self::from_bytes(bytes);
         bytes.zeroize();
         key
@@ -160,7 +160,7 @@ impl RecoveryKey {
     /// Generate a fresh random Recovery Key from the OS CSPRNG.
     pub fn generate() -> Self {
         let mut bytes = [0u8; KEY_LEN];
-        OsRng.fill_bytes(&mut bytes);
+        getrandom::fill(&mut bytes).expect("OS CSPRNG failure");
         let key = Self::from_bytes(bytes);
         bytes.zeroize();
         key
