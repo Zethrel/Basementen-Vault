@@ -1,0 +1,29 @@
+# Automated dependency-update PRs. Complements the CI supply-chain gates
+# (cargo-deny / RustSec) — Dependabot proposes the bumps, CI vets them.
+version: 2
+updates:
+  # Rust workspace (root Cargo.lock covers all member crates).
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the low-risk minor/patch bumps; majors stay separate.
+      cargo-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions pinned in the workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # The server image's base (keeps the pinned rust/debian base current;
+  # see docs/REPRODUCIBLE_BUILDS.md).
+  - package-ecosystem: "docker"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
