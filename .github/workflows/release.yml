@@ -76,7 +76,7 @@ jobs:
             rust_targets: ""
             args: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux bundling dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -129,7 +129,7 @@ jobs:
     needs: resolve
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compute lowercase image name
         id: img
