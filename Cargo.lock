@@ -5527,7 +5527,7 @@ dependencies = [
  "base64 0.22.1",
  "data-encoding",
  "futures-util",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "http-body-util",
  "lettre",
  "rand 0.8.7",
