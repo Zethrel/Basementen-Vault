@@ -37,11 +37,12 @@ fuzzing motivated.
 ### Build & release tooling
 
 - **Build-provenance attestations** (SLSA, `actions/attest-build-provenance`):
-  the release workflow now signs every desktop bundle and the server image,
-  binding each to its source commit and workflow. Anyone can verify an artifact
-  was built from published source with `gh attestation verify` — the primary
-  answer to "do these binaries correspond to the source?" See
-  `docs/REPRODUCIBLE_BUILDS.md`.
+  the release workflow attaches signed provenance to every desktop bundle and
+  the server image, binding each to its source commit and workflow, verifiable
+  with `gh attestation verify`. Gated on repo visibility — GitHub's attestation
+  API is unavailable for user-owned *private* repos, so it activates once the
+  repo is public; until then `SHA256SUMS` (always published) is the verification
+  path. See `docs/REPRODUCIBLE_BUILDS.md`.
 - **Pinned Rust toolchain** (`rust-toolchain.toml` → the exact `rustc`/`cargo`
   version), used by CI, the release workflow, and the server `Dockerfile` (now
   an exact patch base image). A prerequisite for reproducible builds — a

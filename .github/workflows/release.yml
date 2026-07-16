@@ -171,7 +171,10 @@ jobs:
       # SLSA build provenance: cryptographically binds this image digest to the
       # source commit + this workflow, so a puller can verify it was built from
       # published source with `gh attestation verify oci://<image>@<digest>`.
+      # Gated on repo visibility — the attestation API is unavailable for
+      # user-owned private repos (see docs/REPRODUCIBLE_BUILDS.md).
       - name: Attest server image provenance
+        if: ${{ github.event.repository.private == false }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ steps.img.outputs.name }}
@@ -192,26 +195,31 @@ jobs:
           gh release download "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" --dir dist --pattern '*'
 
-      # SLSA build provenance for every desktop bundle, binding each to the
-      # source commit + this workflow. Verify a downloaded file with
-      # `gh attestation verify <file> --repo <owner>/<repo>`.
-      - name: Attest desktop artifact provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: "dist/*"
-
+      # Checksums first, so they are always published even if the optional
+      # attestation step below is skipped or fails.
       - name: Generate SHA256SUMS
         run: |
           cd dist
-          # Write outside the dir first so the sums file can't hash itself.
+          # Write to the repo root so the sums file can't hash itself.
           sha256sum * > ../SHA256SUMS
-          mv ../SHA256SUMS .
-          cat SHA256SUMS
+          cat ../SHA256SUMS
 
       - name: Upload SHA256SUMS to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release upload "${TAG}" dist/SHA256SUMS \
+          gh release upload "${TAG}" SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" --clobber
+
+      # SLSA build provenance for every desktop bundle, binding each to the
+      # source commit + this workflow. Verify with
+      # `gh attestation verify <file> --repo <owner>/<repo>`.
+      # Gated on repo visibility: the GitHub attestation API is not available
+      # for user-owned private repositories (it errors), so this runs only once
+      # the repo is public. See docs/REPRODUCIBLE_BUILDS.md.
+      - name: Attest desktop artifact provenance
+        if: ${{ github.event.repository.private == false }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
