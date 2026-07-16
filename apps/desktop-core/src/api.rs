@@ -92,11 +92,41 @@ fn b64(credential: [u8; 32]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(credential)
 }
 
+/// Normalize a user-entered server address into a URL the HTTP client accepts.
+///
+/// Users naturally type a bare `host:port` (the login field even hints one), but
+/// `reqwest` needs a scheme — without it `127.0.0.1:8080` parses as scheme
+/// `127.0.0.1`, which is rejected ("builder error"). We add one when it's
+/// missing: `http` for loopback / RFC 1918 LAN addresses (where plain HTTP is
+/// acceptable per docs/SELF_HOSTING.md), `https` for anything else, so a bare
+/// public host defaults to TLS rather than silently downgrading a
+/// password-equivalent credential. An explicit scheme is always respected.
+fn normalize_base_url(input: &str) -> String {
+    let trimmed = input.trim().trim_end_matches('/');
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    // Host is everything before the first `:` (port) or `/` (path).
+    let host = trimmed.split([':', '/']).next().unwrap_or(trimmed);
+    let is_private_172 = host
+        .strip_prefix("172.")
+        .and_then(|rest| rest.split('.').next())
+        .and_then(|octet| octet.parse::<u8>().ok())
+        .is_some_and(|octet| (16..=31).contains(&octet));
+    let is_local = matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
+        || host.starts_with("127.")
+        || host.starts_with("10.")
+        || host.starts_with("192.168.")
+        || is_private_172;
+    let scheme = if is_local { "http" } else { "https" };
+    format!("{scheme}://{trimmed}")
+}
+
 impl ApiClient {
     pub fn new(base_url: &str) -> Self {
         Self {
             http: reqwest::Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: normalize_base_url(base_url),
             access_token: None,
             refresh_token: None,
         }
@@ -746,5 +776,77 @@ impl SyncTransport for ApiClient {
             reqwest::StatusCode::NOT_FOUND => Ok(PushOutcome::Conflict { current: None }),
             other => Err(TransportError::Rejected(format!("delete: {other}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_base_url;
+
+    #[test]
+    fn scheme_less_local_gets_http() {
+        // The exact input from the setup screen that produced "builder error".
+        assert_eq!(
+            normalize_base_url("127.0.0.1:8080"),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(
+            normalize_base_url("localhost:8080"),
+            "http://localhost:8080"
+        );
+        assert_eq!(
+            normalize_base_url("192.168.1.20:8080"),
+            "http://192.168.1.20:8080"
+        );
+        assert_eq!(normalize_base_url("10.0.0.5:8080"), "http://10.0.0.5:8080");
+        assert_eq!(
+            normalize_base_url("172.16.0.9:8080"),
+            "http://172.16.0.9:8080"
+        );
+        assert_eq!(normalize_base_url("172.31.255.1"), "http://172.31.255.1");
+    }
+
+    #[test]
+    fn scheme_less_public_defaults_to_https() {
+        // A bare public host must not silently downgrade to plain HTTP.
+        assert_eq!(
+            normalize_base_url("vault.example.com"),
+            "https://vault.example.com"
+        );
+        assert_eq!(
+            normalize_base_url("vault.example.com:8080"),
+            "https://vault.example.com:8080"
+        );
+        // 172.32.x is outside the private 172.16–31 range → public.
+        assert_eq!(normalize_base_url("172.32.0.1"), "https://172.32.0.1");
+    }
+
+    #[test]
+    fn explicit_scheme_is_respected() {
+        assert_eq!(
+            normalize_base_url("https://vault.example.com"),
+            "https://vault.example.com"
+        );
+        // Even an "insecure" explicit choice for a public host is the user's to make.
+        assert_eq!(
+            normalize_base_url("http://vault.example.com"),
+            "http://vault.example.com"
+        );
+        assert_eq!(
+            normalize_base_url("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080"
+        );
+    }
+
+    #[test]
+    fn trims_whitespace_and_trailing_slash() {
+        assert_eq!(
+            normalize_base_url("  http://127.0.0.1:8080/  "),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(
+            normalize_base_url("127.0.0.1:8080/"),
+            "http://127.0.0.1:8080"
+        );
     }
 }
