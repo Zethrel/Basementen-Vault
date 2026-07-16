@@ -9,7 +9,29 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
-      # One PR for the low-risk minor/patch bumps; majors stay separate.
+      # The RustCrypto crates release as an interdependent generation (shared
+      # `digest`/`crypto-common` traits): bumping one alone cannot compile
+      # (see PRs #8/#9/#11/#15). Group their MAJOR bumps into a single PR so
+      # the migration arrives as one reviewable, coordinated change.
+      rustcrypto-generation:
+        applies-to: version-updates
+        update-types: ["major"]
+        patterns:
+          - "sha1"
+          - "sha2"
+          - "hmac"
+          - "hkdf"
+          - "chacha20poly1305"
+          - "argon2"
+          - "blake2"
+          - "digest"
+          - "aead"
+          - "cipher"
+          - "crypto-common"
+          - "password-hash"
+          - "subtle"
+          - "zeroize"
+      # One PR for the low-risk minor/patch bumps; other majors stay separate.
       cargo-minor-and-patch:
         update-types: ["minor", "patch"]
 
@@ -20,10 +42,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
 
-  # The server image's base (keeps the pinned rust/debian base current;
-  # see docs/REPRODUCIBLE_BUILDS.md).
+  # The server image's runtime base (debian). The `rust` BUILD base is ignored:
+  # it must track rust-toolchain.toml (the single source of truth for the
+  # compiler version — see docs/REPRODUCIBLE_BUILDS.md) and is bumped manually,
+  # in lockstep, when the toolchain pin moves. PR #1 bumped it out of sync.
   - package-ecosystem: "docker"
     directory: "/server"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "rust"

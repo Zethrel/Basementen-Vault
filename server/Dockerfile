@@ -2,7 +2,7 @@
 # builds with the same compiler as CI and local reproductions. For a fully
 # reproducible image, pin this and the runtime base below by `@sha256:<digest>`
 # (see docs/REPRODUCIBLE_BUILDS.md).
-FROM rust:1.97.0-slim AS builder
+FROM rust:1.94.1-slim AS builder
 WORKDIR /build
 # Copy the whole workspace: Cargo must load every member manifest to resolve the
 # workspace (root Cargo.toml lists apps/* too), even though `-p vault-server`
