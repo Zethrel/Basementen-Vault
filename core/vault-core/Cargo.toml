@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 # compile a no-op and never pull these in. Both wrap their syscalls behind a
 # safe API, keeping `forbid(unsafe)` intact.
 [target.'cfg(unix)'.dependencies]
-rlimit = "0.10"
+rlimit = "0.11"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 prctl = "1"
