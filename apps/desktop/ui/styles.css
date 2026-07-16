@@ -59,6 +59,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .tab.active { opacity: 1; border-color: var(--accent); }
 
 .error { color: var(--danger); font-size: 0.85rem; min-height: 1.1em; margin: 0.4rem 0; }
+.ok { color: var(--ok); }
 .muted { color: var(--muted); }
 .small { font-size: 0.8rem; }
 .center { text-align: center; margin-top: 4rem; }

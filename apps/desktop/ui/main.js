@@ -179,15 +179,23 @@ function clearEditor() {
     $(id).value = "";
   }
   $("editor-error").textContent = "";
+  $("editor-status").textContent = "";
 }
 
-function showDetailPane(show) {
-  document.querySelector(".split").classList.toggle("show-detail", show);
-  $("btn-back").hidden = !show;
+// Briefly confirm a save. Since a save now clears the form back to a blank
+// new-item state, this reassures the user the item was stored (the cleared
+// form would otherwise look like nothing happened).
+let savedFlashTimer = null;
+function flashSaved(msg) {
+  $("editor-status").textContent = msg;
+  clearTimeout(savedFlashTimer);
+  savedFlashTimer = setTimeout(() => ($("editor-status").textContent = ""), 2500);
 }
-$("btn-back").addEventListener("click", () => showDetailPane(false));
 
-$("btn-new").addEventListener("click", () => {
+// Put the editor into a fresh "new item" state. Used by the New-item button
+// and after every save, so a subsequent Save can never overwrite the item
+// just stored (previously, changing Type then saving clobbered it).
+function startNewItem() {
   selectedId = null;
   clearEditor();
   setEditorKind("login");
@@ -197,7 +205,15 @@ $("btn-new").addEventListener("click", () => {
   showDetailPane(true);
   $("f-name").focus();
   renderList();
-});
+}
+
+function showDetailPane(show) {
+  document.querySelector(".split").classList.toggle("show-detail", show);
+  $("btn-back").hidden = !show;
+}
+$("btn-back").addEventListener("click", () => showDetailPane(false));
+
+$("btn-new").addEventListener("click", () => startNewItem());
 
 async function openItem(id) {
   const item = await invoke("get_item", { itemId: id });
@@ -244,9 +260,14 @@ $("editor").addEventListener("submit", async (e) => {
   try {
     const item = editorItem();
     if (!item.name) throw "name is required";
-    const res = await invoke("save_item", { itemId: selectedId, item });
-    selectedId = res.item_id;
+    const wasNew = selectedId === null;
+    await invoke("save_item", { itemId: selectedId, item });
     await renderList();
+    // Reset to a blank new-item form. This is the key fix: keeping the saved
+    // item bound to the editor meant a following Save (e.g. after switching
+    // Type) overwrote it, silently dropping the previous type's fields.
+    startNewItem();
+    flashSaved(wasNew ? "Saved — ready for the next item." : "Changes saved.");
   } catch (err2) {
     $("editor-error").textContent = String(err2);
   }
