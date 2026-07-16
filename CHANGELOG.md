@@ -5,13 +5,22 @@ All notable changes to Basementen Vault are recorded here. The format follows
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it
 reaches 1.0.
 
-> **Status:** the current tagged release is **1.0.0-beta.4**. It is an
+> **Status:** the current tagged release is **1.0.0-beta.5**. It is an
 > **unaudited beta** — the project has **not** had an independent security audit
 > (a hard prerequisite before real-world use; see `SECURITY.md` and
 > `docs/RUNBOOK.md`). Do not store irreplaceable secrets in it yet. On-disk /
 > on-the-wire formats are versioned but may still change before a final 1.0.0.
 
 ## [Unreleased]
+
+_Nothing yet._
+
+## [1.0.0-beta.5] - 2026-07-16
+
+A maintenance / supply-chain release: the entire crypto dependency stack moves
+to its current upstream generation. **No features, no format changes, no server
+migrations** — existing vaults, exports, Recovery Kits, and server databases
+are untouched, and upgrading requires no user action.
 
 ### Changed
 
@@ -43,6 +52,11 @@ reaches 1.0.
 - **Dependabot** (`.github/dependabot.yml`): weekly dependency-update PRs for
   Cargo, GitHub Actions, and the server Docker base, vetted by the existing CI
   supply-chain gates.
+- **Release-review lockfile hygiene**: bumped the yanked `spin` 0.9.8 to 0.9.9
+  (clearing the last yanked-crate warning) and removed two stale `deny.toml`
+  advisory ignores that no longer match the tree — `RUSTSEC-2023-0071` (`rsa`,
+  gone with `sqlx` 0.9) and `RUSTSEC-2024-0429` (`glib`, advisory no longer
+  applies to the in-tree version).
 
 ### Documentation
 
@@ -282,7 +296,8 @@ First tagged release. Everything below is the initial feature set and hardening.
   sender-constrained (DPoP/mTLS) tokens, WebAuthn/passkeys, mobile Argon2
   parameter benchmarking, and the WebView / JavaScript-heap plaintext residual.
 
-[Unreleased]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.5...HEAD
+[1.0.0-beta.5]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.3...v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.2...v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/Zethrel/Basementen-Vault/compare/v1.0.0-beta.1...v1.0.0-beta.2

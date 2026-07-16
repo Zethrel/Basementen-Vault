@@ -14,7 +14,7 @@
 [advisories]
 version = 2
 # A yanked crate is a warning, not a hard failure (it's a release-hygiene signal,
-# not a vulnerability). Currently: spin 0.9.8 (yanked), pulled transitively.
+# not a vulnerability). None currently in the tree.
 yanked = "warn"
 # Only flag *unmaintained* crates that are our own direct workspace dependencies.
 # The unmaintained crates in the tree are all transitive and unavoidable: the
@@ -25,11 +25,6 @@ unmaintained = "workspace"
 # Accepted advisories. Each is transitive and unreachable in our threat model;
 # revisit whenever the upstream chain updates.
 ignore = [
-  # rsa (Marvin timing side-channel; no patch upstream). NOT COMPILED into any
-  # Basementen Vault binary — it is a Cargo.lock-only artifact from sqlx's MySQL
-  # backend, which we never enable (sqlite-only). `cargo tree -i rsa` finds it in
-  # no target/edge. We perform no RSA operations on any attacker-timed path.
-  "RUSTSEC-2023-0071",
   # quick-xml 0.39.4 quadratic / unbounded-alloc DoS on *untrusted* XML. Reached
   # only through `wayland-scanner` (a build-time proc-macro that parses the
   # static Wayland protocol XML shipped inside the crate) → wl-clipboard-rs →
@@ -38,11 +33,10 @@ ignore = [
   # for the runtime paths.
   "RUSTSEC-2026-0194",
   "RUSTSEC-2026-0195",
-  # glib 0.18 VariantStrIter unsoundness. Transitive via the same Tauri GTK3
-  # stack; not reachable from our code (we never iterate glib GVariant string
-  # arrays). Clears when Tauri moves the Linux backend to a newer glib.
-  "RUSTSEC-2024-0429",
 ]
+# Removed as no longer detected (v1.0.0-beta.5 review): RUSTSEC-2023-0071 (rsa —
+# left the lockfile with sqlx 0.9) and RUSTSEC-2024-0429 (glib — advisory no
+# longer matches the in-tree version). Re-add with justification if they refire.
 
 [bans]
 # Duplicate major versions and wildcard specs are worth surfacing but are almost
