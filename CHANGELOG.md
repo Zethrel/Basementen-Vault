@@ -13,6 +13,15 @@ reaches 1.0.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [1.0.0-beta.5] - 2026-07-16
+
+Refreshes the entire crypto dependency stack to its current upstream generation,
+plus the first round of self-hosting UX fixes found in real testing. **No format
+changes and no server migrations** — existing vaults, exports, Recovery Kits, and
+server databases are untouched, and upgrading requires no user action.
+
 ### Added
 
 - **Resend verification e-mail**: a new `POST /api/v1/accounts/resend-verification`
@@ -37,13 +46,6 @@ reaches 1.0.
 - **Console mailer readability**: e-mail bodies now print with real line breaks
   instead of escaped `\n`, so a verification/recovery link lands on its own line
   and copies cleanly out of the server log.
-
-## [1.0.0-beta.5] - 2026-07-16
-
-A maintenance / supply-chain release: the entire crypto dependency stack moves
-to its current upstream generation. **No features, no format changes, no server
-migrations** — existing vaults, exports, Recovery Kits, and server databases
-are untouched, and upgrading requires no user action.
 
 ### Changed
 
