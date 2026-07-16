@@ -13,6 +13,19 @@ reaches 1.0.
 
 ## [Unreleased]
 
+### Build & release tooling
+
+- **Dependabot** (`.github/dependabot.yml`): weekly dependency-update PRs for
+  Cargo, GitHub Actions, and the server Docker base, vetted by the existing CI
+  supply-chain gates.
+
+### Documentation
+
+- Recorded the **Dependabot-alert disposition** for the accepted transitive
+  advisories (e.g. `glib` `RUSTSEC-2024-0429`): dismissed as "risk is tolerable",
+  cross-referenced to the `deny.toml` ignore list as the single source of truth
+  (`THREAT_MODEL` §A7 + `deny.toml` header). Surfaced once the repo went public.
+
 ## [1.0.0-beta.4] - 2026-07-15
 
 Third review pass: supply-chain gating, a CI-trigger fix, coverage-guided

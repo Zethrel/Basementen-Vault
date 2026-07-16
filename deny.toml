@@ -4,6 +4,9 @@
 # cargo-deny's `advisories` check queries the same RustSec advisory database as
 # `cargo audit`, so it *is* our advisory scan; it just gives one auditable place
 # (this file) to record every accepted/ignored advisory with a justification.
+# This file is the single source of truth for accepted advisories: GitHub
+# Dependabot alerts for these same transitive crates are dismissed as "risk is
+# tolerable" and cross-referenced here (see docs/THREAT_MODEL.md §A7).
 #
 # The `licenses` check is configured but not gated in CI yet — enable it once the
 # allow-list is confirmed against the full dependency tree.

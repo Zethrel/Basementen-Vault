@@ -338,6 +338,16 @@ a written rationale rather than left to fail silently:
 These clear as the Tauri Linux stack updates; the ignore list is reviewed each
 time the dependency tree changes.
 
+**Dependabot (public repo).** The same transitive advisories also surface as
+GitHub Dependabot alerts now that the repository is public — e.g. the `glib`
+`RUSTSEC-2024-0429` unsoundness (a crash-only NULL-deref in `VariantStrIter`,
+reached only through Tauri's Linux GTK backend, never from first-party code).
+These are dismissed with **"risk is tolerable to this project"**, cross-
+referenced to the `deny.toml` ignore list above, which remains the single source
+of truth. The CI `cargo deny` gate — not Dependabot's UI — is the *enforced*
+advisory check; Dependabot's role is dependency-update PRs
+(`.github/dependabot.yml`), which CI then vets.
+
 **No telemetry.** The client and server contain no analytics, crash-reporting,
 or phone-home code — there is nothing that transmits usage data or panic
 contents off the device. The only outbound calls the client makes are to the
