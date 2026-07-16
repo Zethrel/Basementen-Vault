@@ -13,13 +13,51 @@ docker compose up -d
 curl http://127.0.0.1:8080/api/v1/health   # → ok
 ```
 
-Or without Docker:
+## Without Docker (standalone binary)
+
+Every release ships standalone `vault-server` binaries for Windows, Linux
+(x86-64 and ARM64 — Raspberry Pi), and macOS: download the one for your OS
+from the GitHub release, verify it against `SHA256SUMS`, and run it. There is
+no installer and nothing else to set up — configuration is environment
+variables (same table below; the `.env` file is a Docker convenience, the
+bare binary reads the process environment).
+
+**Windows** — put the binary in a folder of its own and start it with a
+`run.bat` next to it:
+
+```bat
+@echo off
+set BV_LISTEN_ADDR=0.0.0.0:8080
+set BV_DB_PATH=%ProgramData%\BasementenVault\vault.db
+set BV_BASE_URL=http://192.168.1.20:8080
+set BV_MAILER=console
+vault-server-v1.0.0-beta.5-x86_64-windows.exe
+```
+
+Replace `192.168.1.20` with the machine's LAN IP (`ipconfig`). Create the
+`%ProgramData%\BasementenVault` folder first. With the console mailer,
+verification links appear in this terminal window. To let other devices on
+your network reach it, allow the port through Windows Firewall once, from an
+administrator prompt:
+
+```
+netsh advfirewall firewall add rule name="Basementen Vault" dir=in action=allow protocol=TCP localport=8080
+```
+
+Note `BV_LISTEN_ADDR=0.0.0.0:8080`: the default (`127.0.0.1`) is
+localhost-only, which other devices — including your phone — cannot reach.
+Binding to the LAN without TLS is acceptable only for testing on a network
+you trust; for real use, front it with a VPN (Tailscale) or Caddy TLS as
+described below.
+
+**Linux/macOS** — same idea:
 
 ```sh
-cargo build --release -p vault-server
 BV_DB_PATH=/var/lib/vault/vault.db BV_LISTEN_ADDR=127.0.0.1:8080 \
-  ./target/release/vault-server
+  ./vault-server-v1.0.0-beta.5-x86_64-linux
 ```
+
+Building from source works too: `cargo build --release -p vault-server`.
 
 ## Configuration reference
 

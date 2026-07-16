@@ -52,6 +52,10 @@ are untouched, and upgrading requires no user action.
 - **Dependabot** (`.github/dependabot.yml`): weekly dependency-update PRs for
   Cargo, GitHub Actions, and the server Docker base, vetted by the existing CI
   supply-chain gates.
+- **Standalone server binaries in releases**: `release.yml` now also builds and
+  attaches bare `vault-server` binaries (Windows x86-64, Linux x86-64/ARM64,
+  macOS ARM64) so self-hosters don't need Docker; `docs/SELF_HOSTING.md` gained
+  a "Without Docker" section including Windows LAN setup.
 - **Release-review lockfile hygiene**: bumped the yanked `spin` 0.9.8 to 0.9.9
   (clearing the last yanked-crate warning) and removed two stale `deny.toml`
   advisory ignores that no longer match the tree — `RUSTSEC-2023-0071` (`rsa`,

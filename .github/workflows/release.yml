@@ -124,6 +124,58 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+  # Standalone server binaries for self-hosters who don't run Docker: the
+  # server is a single static-ish binary with embedded SQLite, so a bare
+  # download + a few env vars is a complete deployment (docs/SELF_HOSTING.md
+  # "Without Docker"). Runs after `desktop` so the draft release the assets
+  # attach to is guaranteed to exist.
+  server-binary:
+    name: Server binary (${{ matrix.label }})
+    needs: [resolve, desktop]
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            label: x86_64-windows
+            binary: target/release/vault-server.exe
+            asset_ext: ".exe"
+          - platform: ubuntu-22.04
+            label: x86_64-linux
+            binary: target/release/vault-server
+            asset_ext: ""
+          - platform: ubuntu-22.04-arm
+            label: aarch64-linux
+            binary: target/release/vault-server
+            asset_ext: ""
+          - platform: macos-latest
+            label: aarch64-macos
+            binary: target/release/vault-server
+            asset_ext: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build vault-server
+        run: cargo build --release -p vault-server
+
+      - name: Upload to the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          asset="vault-server-${TAG}-${{ matrix.label }}${{ matrix.asset_ext }}"
+          cp "${{ matrix.binary }}" "$asset"
+          gh release upload "$TAG" "$asset" \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
   server-image:
     name: Server image (multi-arch)
     needs: resolve
@@ -183,7 +235,7 @@ jobs:
 
   checksums:
     name: Publish SHA256SUMS
-    needs: [resolve, desktop]
+    needs: [resolve, desktop, server-binary]
     runs-on: ubuntu-latest
     steps:
       - name: Download the draft release's assets
