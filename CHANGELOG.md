@@ -25,6 +25,14 @@ reaches 1.0.
   **algorithms, key derivation, and all on-disk / on-the-wire formats are
   unchanged** — v1/v2 ciphertext round-trip and AAD version-binding tests prove
   existing vaults decrypt as before.
+- **`rand` 0.8→0.10** (completes Dependabot PR #18, same ecosystem generation
+  as the RustCrypto migration): the password generator in `desktop-core` moves
+  to the renamed API (`SysRng` + `UnwrapErr`, `random_range`); `vault-server`
+  drops `rand` entirely — TOTP/MFA secrets, recovery codes, tokens, and the
+  Argon2 storage salt now draw from `getrandom` directly, matching `vault-core`.
+  Output semantics are unchanged (same OS CSPRNG, same uniform sampling, same
+  16-byte PHC salt format); `rand` 0.9 remains in the lockfile only as
+  `proptest`'s dev-dependency.
 - **`argon2` deliberately stays at 0.5**: the new-generation `argon2` is still a
   release candidate (`0.6.0-rc.x`), and the KDF of a password vault does not
   ride on RCs. Its internal `digest` 0.10 coexists as a duplicate-version

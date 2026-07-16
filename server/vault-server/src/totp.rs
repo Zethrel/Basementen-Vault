@@ -6,8 +6,6 @@
 
 use data_encoding::BASE32_NOPAD;
 use hmac::{Hmac, KeyInit, Mac};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use sha1::Sha1;
 use subtle::ConstantTimeEq;
 
@@ -19,7 +17,7 @@ const DRIFT_STEPS: i64 = 1;
 /// Generate a new 160-bit shared secret, base32-encoded for QR/manual entry.
 pub fn generate_secret() -> String {
     let mut bytes = [0u8; 20];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable");
     BASE32_NOPAD.encode(&bytes)
 }
 

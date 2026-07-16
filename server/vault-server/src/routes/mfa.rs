@@ -1,8 +1,6 @@
 use axum::extract::State;
 use axum::Json;
 use data_encoding::BASE32_NOPAD;
-use rand::rngs::OsRng;
-use rand::RngCore;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -194,7 +192,7 @@ async fn issue_recovery_codes(state: &AppState, account_id: i64) -> Result<Vec<S
     let mut codes = Vec::with_capacity(10);
     for _ in 0..10 {
         let mut bytes = [0u8; 5];
-        OsRng.fill_bytes(&mut bytes);
+        getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable");
         let raw = BASE32_NOPAD.encode(&bytes); // 8 chars
         let code = format!("{}-{}", &raw[..4], &raw[4..]);
         let normalized: String = code

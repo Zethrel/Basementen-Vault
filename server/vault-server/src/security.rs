@@ -3,15 +3,13 @@
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 use hmac::{Hmac, KeyInit, Mac};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// 32 random bytes from the OS CSPRNG (server-side process secrets).
 pub fn random_secret() -> [u8; 32] {
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable");
     bytes
 }
 
@@ -37,7 +35,9 @@ fn server_argon2() -> Argon2<'static> {
 
 /// Hash a client auth credential for storage (PHC string, random salt).
 pub fn hash_credential(credential: &[u8]) -> String {
-    let salt = SaltString::generate(&mut OsRng);
+    let mut salt_bytes = [0u8; 16];
+    getrandom::fill(&mut salt_bytes).expect("OS CSPRNG unavailable");
+    let salt = SaltString::encode_b64(&salt_bytes).expect("16 bytes fits a salt string");
     server_argon2()
         .hash_password(credential, &salt)
         .expect("hashing cannot fail with valid params")
@@ -59,7 +59,7 @@ pub fn verify_credential(credential: &[u8], phc: &str) -> bool {
 /// side channel.
 pub fn make_dummy_hash() -> String {
     let mut random = [0u8; 32];
-    OsRng.fill_bytes(&mut random);
+    getrandom::fill(&mut random).expect("OS CSPRNG unavailable");
     hash_credential(&random)
 }
 
@@ -72,7 +72,7 @@ pub const FAILURE_DELAY_MAX_MS: u64 = 300;
 
 pub async fn failure_delay() {
     let mut bytes = [0u8; 8];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable");
     let span = FAILURE_DELAY_MAX_MS - FAILURE_DELAY_MIN_MS + 1;
     let ms = FAILURE_DELAY_MIN_MS + u64::from_le_bytes(bytes) % span;
     tokio::time::sleep(Duration::from_millis(ms)).await;
@@ -84,7 +84,7 @@ pub async fn failure_delay() {
 pub fn new_token(prefix: &str) -> (String, Vec<u8>) {
     use base64::Engine;
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable");
     let token = format!(
         "{prefix}{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)

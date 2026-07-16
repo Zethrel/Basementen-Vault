@@ -1,8 +1,9 @@
 //! Password generation from the OS CSPRNG.
 
-use rand::rngs::OsRng;
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
@@ -83,16 +84,18 @@ pub fn generate_password(
     }
 
     let pool: Vec<char> = classes.iter().flatten().copied().collect();
-    let mut rng = OsRng;
+    // SysRng is fallible by signature; a failing OS CSPRNG is fatal here, so
+    // UnwrapErr converts it to the infallible interface the samplers need.
+    let mut rng = UnwrapErr(SysRng);
     let mut chars: Vec<char> = Vec::with_capacity(opts.length);
 
     // One guaranteed pick per class…
     for class in &classes {
-        chars.push(class[rng.gen_range(0..class.len())]);
+        chars.push(class[rng.random_range(0..class.len())]);
     }
     // …the rest uniform over the pool…
     while chars.len() < opts.length {
-        chars.push(pool[rng.gen_range(0..pool.len())]);
+        chars.push(pool[rng.random_range(0..pool.len())]);
     }
     // …then shuffle so the guaranteed picks aren't positionally predictable.
     chars.shuffle(&mut rng);
