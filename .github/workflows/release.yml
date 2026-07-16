@@ -156,7 +156,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ needs.resolve.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.resolve.outputs.tag }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         id: build
         with:
           context: .
