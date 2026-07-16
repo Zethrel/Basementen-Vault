@@ -134,6 +134,42 @@ pub async fn register(
     Ok(Json(response))
 }
 
+#[derive(Deserialize)]
+pub struct ResendVerificationRequest {
+    pub email: String,
+}
+
+/// POST /api/v1/accounts/resend-verification
+///
+/// Issues a fresh verification link for an account that exists but has not been
+/// verified. The original link expires after 15 minutes and registering again
+/// with the same address does not mint a new one, so without this an account
+/// could get permanently stranded in the unverified state.
+///
+/// Anti-enumeration: the response is identical whether the address is unknown,
+/// already verified, or genuinely pending — only a real pending account
+/// actually triggers an e-mail, and the other paths burn the same failure delay
+/// so timing can't distinguish them.
+pub async fn resend_verification(
+    State(state): State<AppState>,
+    Json(req): Json<ResendVerificationRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let email = vault_core::kdf::normalize_email(&req.email);
+    let response = json!({
+        "status": "ok",
+        "message": "If this address has an account awaiting verification, a new \
+                    link has been sent."
+    });
+
+    match db::account_by_email(&state.db, &email).await? {
+        Some(account) if account.email_verified_at.is_none() => {
+            send_verification_email(&state, account.id, &account.email).await?;
+        }
+        _ => security::failure_delay().await,
+    }
+    Ok(Json(response))
+}
+
 async fn send_verification_email(
     state: &AppState,
     account_id: i64,

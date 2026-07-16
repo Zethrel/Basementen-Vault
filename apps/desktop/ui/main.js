@@ -49,6 +49,8 @@ function setMode(m) {
   $("row-totp").hidden = m !== "login";
   $("setup-submit").textContent = m === "login" ? "Log in" : "Create account";
   $("setup-error").textContent = "";
+  $("setup-info").textContent = "";
+  $("resend-verify").hidden = true;
 }
 $("tab-login").addEventListener("click", () => setMode("login"));
 $("tab-register").addEventListener("click", () => setMode("register"));
@@ -58,6 +60,8 @@ $("setup-submit").addEventListener("click", async () => {
   const email = $("setup-email").value.trim();
   const password = $("setup-password").value;
   $("setup-error").textContent = "";
+  $("setup-info").textContent = "";
+  $("resend-verify").hidden = true;
   $("setup-submit").disabled = true;
   try {
     if (!server || !email || !password) throw "fill in server, e-mail and password";
@@ -79,9 +83,32 @@ $("setup-submit").addEventListener("click", async () => {
       await renderList();
     }
   } catch (e) {
-    $("setup-error").textContent = String(e);
+    const msg = String(e);
+    $("setup-error").textContent = msg;
+    // Surface the resend option only when the block is an unverified address.
+    if (mode === "login" && /not verified|verif/i.test(msg)) {
+      $("resend-verify").hidden = false;
+    }
   } finally {
     $("setup-submit").disabled = false;
+  }
+});
+
+$("resend-verify").addEventListener("click", async () => {
+  const server = $("setup-server").value.trim();
+  const email = $("setup-email").value.trim();
+  $("setup-info").textContent = "";
+  $("resend-verify").disabled = true;
+  try {
+    if (!server || !email) throw "fill in server and e-mail first";
+    $("setup-info").textContent = await invoke("resend_verification", {
+      serverUrl: server,
+      email,
+    });
+  } catch (e) {
+    $("setup-error").textContent = String(e);
+  } finally {
+    $("resend-verify").disabled = false;
   }
 });
 

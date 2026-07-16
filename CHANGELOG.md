@@ -13,7 +13,30 @@ reaches 1.0.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Resend verification e-mail**: a new `POST /api/v1/accounts/resend-verification`
+  endpoint (and a "Didn't get the verification e-mail? Resend it…" link on the
+  login screen, shown when a login is blocked as unverified) issues a fresh link
+  for an account that exists but hasn't been verified. Previously the 15-minute
+  link could lapse with no way to get a new one — registering again didn't mint
+  one — stranding the account. Anti-enumeration: the response is identical for
+  unknown, already-verified, and genuinely-pending addresses, and only a real
+  pending account triggers an e-mail.
+
+### Fixed
+
+- **Desktop: scheme-less server URL** no longer fails with "network error:
+  builder error". The client now adds `http://` for loopback/LAN hosts and
+  `https://` for public hosts when no scheme is typed (explicit scheme
+  respected).
+- **Desktop: editor no longer overwrites the item just saved.** After a save the
+  form stayed bound to that item, so adding another (e.g. after switching Type)
+  overwrote it and dropped the previous type's fields. Every save now resets to
+  a fresh new-item form, with a brief "Saved" confirmation.
+- **Console mailer readability**: e-mail bodies now print with real line breaks
+  instead of escaped `\n`, so a verification/recovery link lands on its own line
+  and copies cleanly out of the server log.
 
 ## [1.0.0-beta.5] - 2026-07-16
 

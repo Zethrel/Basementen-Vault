@@ -36,6 +36,8 @@
         <input id="setup-totp" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" />
       </label>
       <p id="setup-error" class="error" role="alert"></p>
+      <button id="resend-verify" class="linklike" hidden>Didn't get the verification e-mail? Resend it…</button>
+      <p id="setup-info" class="ok small" role="status"></p>
       <button id="setup-submit" class="primary">Log in</button>
       <p class="muted small">Your master password never leaves this device — new
         passwords are checked against known data breaches using only a short,

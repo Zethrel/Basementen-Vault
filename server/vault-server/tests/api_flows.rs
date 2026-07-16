@@ -344,6 +344,89 @@ async fn registering_existing_email_does_not_leak_or_overwrite() {
 }
 
 #[tokio::test]
+async fn resend_verification_issues_a_fresh_working_link() {
+    let server = test_server().await;
+
+    // Register but do NOT verify (simulating a lapsed 15-minute token).
+    let (reg, body) = client_bundle(EMAIL, PASSWORD);
+    let (status, _) = server
+        .request("POST", "/api/v1/accounts/register", None, Some(body))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Ask for a new link.
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/accounts/resend-verification",
+            None,
+            Some(json!({ "email": EMAIL })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ok");
+
+    // The freshest token verifies, and the account can then log in.
+    let token = server.last_email_token(EMAIL);
+    let (status, _) = server
+        .request(
+            "GET",
+            &format!("/api/v1/accounts/verify?token={token}"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = login(&server, &reg, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn resend_verification_is_anti_enumeration() {
+    let server = test_server().await;
+
+    // Unknown address: same OK response, and crucially no e-mail is sent
+    // (so nothing distinguishes it from a real pending account).
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/accounts/resend-verification",
+            None,
+            Some(json!({ "email": "nobody@example.com" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ok");
+    assert!(
+        !server
+            .state
+            .mailer
+            .sent()
+            .iter()
+            .any(|m| m.to == "nobody@example.com"),
+        "no e-mail should be sent to an unknown address"
+    );
+
+    // Already-verified account: also a no-op (no new verification e-mail).
+    register_and_verify(&server).await;
+    let before = server.state.mailer.sent().len();
+    let (status, _) = server
+        .request(
+            "POST",
+            "/api/v1/accounts/resend-verification",
+            None,
+            Some(json!({ "email": EMAIL })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        server.state.mailer.sent().len(),
+        before,
+        "a verified account must not receive another verification e-mail"
+    );
+}
+
+#[tokio::test]
 async fn totp_enroll_activate_and_login() {
     let server = test_server().await;
     let reg = register_and_verify(&server).await;

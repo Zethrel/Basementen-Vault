@@ -58,6 +58,10 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::accounts::register),
         )
         .route("/api/v1/accounts/verify", get(routes::accounts::verify))
+        .route(
+            "/api/v1/accounts/resend-verification",
+            post(routes::accounts::resend_verification),
+        )
         .route("/api/v1/accounts/prelogin", get(routes::accounts::prelogin))
         .route("/api/v1/auth/login", post(routes::auth::login))
         .route("/api/v1/auth/refresh", post(routes::auth::refresh))

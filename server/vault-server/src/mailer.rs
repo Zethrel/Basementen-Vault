@@ -76,7 +76,18 @@ impl Mailer {
     pub async fn send(&self, to: &str, subject: &str, body: &str) {
         match self {
             Mailer::Console => {
-                tracing::info!(to, subject, body, "outgoing e-mail (console mailer)");
+                // Render the body in the log *message* so its line breaks print
+                // literally. A structured `body` field would escape them to `\n`
+                // and smear a verification/recovery link across the line, which
+                // makes it painful (and error-prone) to copy — the whole point
+                // of the console mailer is a human reading that link out of the
+                // log.
+                tracing::info!(
+                    "outgoing e-mail (console mailer)\n\
+                     ── to:      {to}\n\
+                     ── subject: {subject}\n\n\
+                     {body}\n"
+                );
             }
             Mailer::Smtp { transport, from } => {
                 let msg = Mailbox::try_from((String::new(), to.to_string()))

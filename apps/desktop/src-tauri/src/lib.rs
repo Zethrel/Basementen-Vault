@@ -476,6 +476,16 @@ async fn recover_start(server_url: String, email: String) -> Result<String, Stri
     )
 }
 
+/// Ask the server to re-send the e-mail verification link (the original
+/// expires after 15 minutes). Anti-enumeration: the message is the same
+/// whether or not the address has a pending account.
+#[tauri::command]
+async fn resend_verification(server_url: String, email: String) -> Result<String, String> {
+    let api = ApiClient::new(&server_url);
+    api.resend_verification(&email).await.map_err(err)?;
+    Ok("If that address has an account awaiting verification, a new link was sent.".into())
+}
+
 #[derive(Serialize)]
 struct RecoverResult {
     /// The NEW Recovery Kit code (the old kit is spent). Empty for wipes.
@@ -995,6 +1005,7 @@ pub fn run() {
             sync_now,
             generate,
             copy_secret,
+            resend_verification,
             recover_start,
             recover_complete,
             set_backup_email,

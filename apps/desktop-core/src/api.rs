@@ -210,6 +210,25 @@ impl ApiClient {
         }
     }
 
+    /// Ask the server to re-send the e-mail verification link. Anti-enumeration:
+    /// always succeeds regardless of whether the address exists or is already
+    /// verified, so the caller learns nothing from the result.
+    pub async fn resend_verification(&self, email: &str) -> Result<(), ApiError> {
+        let resp = self
+            .http
+            .post(self.url("/api/v1/accounts/resend-verification"))
+            .json(&json!({ "email": email }))
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            Err(Self::classify(status, &body))
+        }
+    }
+
     pub async fn login(
         &mut self,
         email: &str,
