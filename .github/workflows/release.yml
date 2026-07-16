@@ -175,7 +175,7 @@ jobs:
       # user-owned private repos (see docs/REPRODUCIBLE_BUILDS.md).
       - name: Attest server image provenance
         if: ${{ github.event.repository.private == false }}
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ steps.img.outputs.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -220,6 +220,6 @@ jobs:
       # the repo is public. See docs/REPRODUCIBLE_BUILDS.md.
       - name: Attest desktop artifact provenance
         if: ${{ github.event.repository.private == false }}
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*"
