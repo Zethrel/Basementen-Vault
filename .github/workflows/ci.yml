@@ -15,7 +15,7 @@ jobs:
     name: Build & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Tauri Linux dependencies
         run: |
           sudo apt-get update
@@ -44,7 +44,7 @@ jobs:
     name: Supply-chain (cargo-deny / RustSec)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Advisories + banned/duplicate crates + source registries. The `licenses`
       # check is intentionally left out until its allow-list (deny.toml) is
       # confirmed against the full tree — see the note in deny.toml.

@@ -23,7 +23,7 @@ jobs:
       # has a dynamic libc and is the runner's native target.
       FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: x86_64-unknown-linux-gnu
