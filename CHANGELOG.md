@@ -28,6 +28,11 @@ reaches 1.0.
   existing tags (keyboard-navigable, click or Enter to accept), so reusing a tag
   like "Shop A" doesn't accidentally spawn near-duplicates ("shop a", "ShopA")
   that would fragment the filter.
+- **Password health dashboard** (🛡 in the toolbar): scans every login's password
+  and flags **weak** ones (zxcvbn ≤ 2) and **reused** ones (shared across items),
+  weakest first, with a click-through to fix each. The analysis runs on-device
+  and the report carries no passwords — only per-item scores, a reuse flag, and
+  names. New `vault-core` `health` module (unit-tested) + `vault_health` command.
 
 ## [1.0.0-beta.5] - 2026-07-16
 

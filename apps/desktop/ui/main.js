@@ -483,6 +483,61 @@ document.querySelectorAll("button.copy").forEach((btn) => {
 });
 
 // ---------------------------------------------------------------------------
+// Password health dialog
+
+const healthDialog = $("health-dialog");
+$("btn-health").addEventListener("click", async () => {
+  const summary = $("health-summary");
+  const list = $("health-list");
+  summary.textContent = "Checking…";
+  summary.className = "muted small";
+  list.textContent = "";
+  healthDialog.showModal();
+  let rep;
+  try {
+    rep = await invoke("vault_health");
+  } catch (e) {
+    summary.textContent = String(e);
+    return;
+  }
+  if (rep.total_with_password === 0) {
+    summary.textContent = "No logins with a password to check yet.";
+    return;
+  }
+  if (rep.items.length === 0) {
+    summary.textContent = `All ${rep.total_with_password} password(s) look strong and unique. 🎉`;
+    summary.className = "small health-ok";
+    return;
+  }
+  summary.className = "muted small";
+  summary.textContent =
+    `${rep.weak_count} weak, ${rep.reused_count} reused of ${rep.total_with_password} checked.`;
+  for (const it of rep.items) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "hname";
+    name.textContent = it.name || "(unnamed)";
+    li.append(name);
+    if (it.score <= 1) li.append(badge("weak", "weak"));
+    else if (it.score === 2) li.append(badge("fair", "fair"));
+    if (it.reused) li.append(badge("reused", "reused"));
+    // Jump straight to the offending item to fix it.
+    li.addEventListener("click", () => {
+      healthDialog.close();
+      openItem(it.item_id);
+    });
+    list.append(li);
+  }
+});
+function badge(text, cls) {
+  const b = document.createElement("span");
+  b.className = "hbadge " + cls;
+  b.textContent = text;
+  return b;
+}
+$("health-close").addEventListener("click", () => healthDialog.close());
+
+// ---------------------------------------------------------------------------
 // Generator dialog
 
 const genDialog = $("gen-dialog");

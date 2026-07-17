@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod generator;
+pub mod health;
 pub mod hibp;
 pub mod items;
 pub mod mfa;
@@ -18,6 +19,7 @@ pub mod transfer;
 
 pub use api::{ApiClient, ApiError, LoginOutcome, PreloginInfo, RecoveryData, SessionInfo};
 pub use generator::{generate_password, GeneratorOptions};
+pub use health::{analyze as analyze_health, HealthEntry, HealthReport};
 pub use hibp::{password_breach_count, HibpError};
 pub use items::{Item, ItemSummary};
 pub use mfa::totp_qr_svg;

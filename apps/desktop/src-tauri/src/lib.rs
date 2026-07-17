@@ -7,7 +7,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use desktop_core::store::AccountMeta;
-use desktop_core::{ApiClient, AutoLock, GeneratorOptions, Item, ItemSummary, SqliteVault};
+use desktop_core::{
+    ApiClient, AutoLock, GeneratorOptions, HealthEntry, HealthReport, Item, ItemSummary,
+    SqliteVault,
+};
 use serde::Serialize;
 use tauri::{Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -380,6 +383,40 @@ async fn list_tags(ctx: Ctx<'_>) -> Result<Vec<TagCount>, String> {
             .collect();
         out.sort_by_key(|t| t.tag.to_lowercase());
         Ok(out)
+    })
+    .await
+}
+
+/// Analyze every login's password for weakness and reuse. Returns a report
+/// that carries no passwords — only per-item scores, a reuse flag, ids/names.
+#[tauri::command]
+async fn vault_health(ctx: Ctx<'_>) -> Result<HealthReport, String> {
+    with_session(&ctx, |u| {
+        let mut entries = Vec::new();
+        for stored in u.vault.list() {
+            if stored.deleted || stored.item_id.starts_with("__meta/") {
+                continue;
+            }
+            let Some(content) = &stored.content else {
+                continue;
+            };
+            let Ok(plain) = u.secrets.vault_key.decrypt_item(content) else {
+                continue;
+            };
+            let Ok(item) = Item::from_plaintext(&plain) else {
+                continue;
+            };
+            if let Item::Login { password, .. } = &item {
+                if !password.is_empty() {
+                    entries.push(HealthEntry {
+                        item_id: stored.item_id.clone(),
+                        name: item.name().to_string(),
+                        password: Zeroizing::new(password.clone()),
+                    });
+                }
+            }
+        }
+        Ok(desktop_core::analyze_health(&entries))
     })
     .await
 }
@@ -1056,6 +1093,7 @@ pub fn run() {
             lock,
             list_items,
             list_tags,
+            vault_health,
             get_item,
             save_item,
             delete_item,

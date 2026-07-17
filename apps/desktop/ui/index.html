@@ -129,6 +129,7 @@
       <span id="sync-status" class="muted small"></span>
       <button id="btn-sync" title="Sync now">⟳ Sync</button>
       <button id="btn-new">＋ New item</button>
+      <button id="btn-health" title="Password health">🛡</button>
       <button id="btn-account" title="Account settings">⚙</button>
       <button id="btn-lock" title="Lock vault">🔒 Lock</button>
     </header>
@@ -304,6 +305,15 @@
       <button id="gen-again">Regenerate</button>
       <button id="gen-use" class="primary">Use password</button>
       <button id="gen-close">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="health-dialog">
+    <h2>Password health</h2>
+    <p id="health-summary" class="muted small"></p>
+    <ul id="health-list" class="health-list"></ul>
+    <div class="row">
+      <button id="health-close">Close</button>
     </div>
   </dialog>
 
