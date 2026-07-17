@@ -162,6 +162,102 @@ async fn login(
 }
 
 // ---------------------------------------------------------------------------
+// Upgrade-in-place / restart safety helpers (file-backed DB)
+
+fn unique_db_path() -> std::path::PathBuf {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("bv-migration-{}-{}.db", std::process::id(), nanos))
+}
+
+fn file_config(db_path: &str) -> Config {
+    Config {
+        listen_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+        db_path: db_path.into(),
+        base_url: "http://vault.test".into(),
+        registration_open: true,
+        trust_proxy: false,
+        recovery_cooloff_secs: 72 * 3600,
+        mail: MailConfig::Console,
+    }
+}
+
+/// A server backed by a real file DB (so its data persists across pool drops).
+async fn file_server(db_path: &str) -> TestServer {
+    let pool = db::connect(db_path)
+        .await
+        .expect("file db connects + migrates");
+    let state = AppState::new(
+        pool,
+        file_config(db_path),
+        Mailer::Memory(Mutex::new(Vec::new())),
+    )
+    .await;
+    TestServer {
+        app: build_app(state.clone()),
+        state,
+    }
+}
+
+async fn prelogin_salt(server: &TestServer, email: &str) -> String {
+    let (status, body) = server
+        .request(
+            "GET",
+            &format!("/api/v1/accounts/prelogin?email={email}"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    body["kdf_salt"].as_str().unwrap().to_string()
+}
+
+/// Upgrade-in-place proxy (RELEASE_CHECKLIST §2): migrations must apply cleanly
+/// on a *populated* database, not just an empty one, and data must survive a
+/// restart. Populate a file-backed DB through the real API, drop it (server
+/// stops), reopen the same file (`connect()` re-runs `migrate!()`), and confirm
+/// the account, its account-lifetime KDF salt, and its credentials all survive.
+#[tokio::test]
+async fn data_survives_restart_and_remigration() {
+    let db_path = unique_db_path();
+    let db_str = db_path.to_str().unwrap().to_string();
+
+    // Phase 1: populate (account + verified e-mail + a login session), then let
+    // the pool + state drop — simulating the server process stopping.
+    let reg;
+    let salt_before;
+    {
+        let server = file_server(&db_str).await;
+        reg = register_and_verify(&server).await;
+        let (status, _) = login(&server, &reg, json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        salt_before = prelogin_salt(&server, EMAIL).await;
+    }
+
+    // Phase 2: reopen the SAME file. Re-running migrations on the populated DB
+    // must be a clean no-op, and everything must still be there.
+    {
+        let server = file_server(&db_str).await;
+        let salt_after = prelogin_salt(&server, EMAIL).await;
+        assert_eq!(
+            salt_before, salt_after,
+            "the account's KDF salt must survive a restart"
+        );
+        let (status, body) = login(&server, &reg, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "login after restart: {body}");
+        assert!(body["access_token"].as_str().unwrap().starts_with("bvat_"));
+    }
+
+    // Best-effort cleanup of the temp DB and its WAL/SHM sidecars.
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{db_str}{suffix}"));
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn register_verify_login_and_unlock_vault() {

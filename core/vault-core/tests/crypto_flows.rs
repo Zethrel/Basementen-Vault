@@ -271,6 +271,31 @@ fn item_ciphertext_length_is_bucketed() {
     assert_eq!(large.ciphertext.len(), large2.ciphertext.len());
 }
 
+#[test]
+fn large_items_use_coarse_graduated_buckets_and_roundtrip() {
+    // The graduated padding schedule (beta.6) hides large-item size more
+    // coarsely than the old fixed-256 scheme: two big notes whose sizes differ
+    // by less than one (large) block encrypt to the same ciphertext length, and
+    // the content still decrypts exactly.
+    let vk = VaultKey::generate();
+    let a = vk.encrypt_item("a", 1, &vec![1u8; 40_000]).unwrap();
+    let b = vk.encrypt_item("b", 1, &vec![2u8; 40_500]).unwrap();
+    assert_eq!(
+        a.ciphertext.len(),
+        b.ciphertext.len(),
+        "two large items within one block must share a ciphertext length"
+    );
+    // A much larger item lands in a strictly larger bucket.
+    let big = vk.encrypt_item("c", 1, &vec![3u8; 90_000]).unwrap();
+    assert!(big.ciphertext.len() > a.ciphertext.len());
+
+    // Round-trip integrity at large sizes.
+    let plain = vec![0xA5u8; 40_000];
+    assert_eq!(vk.decrypt_item(&a).unwrap().len(), 40_000);
+    let re = vk.encrypt_item("d", 1, &plain).unwrap();
+    assert_eq!(vk.decrypt_item(&re).unwrap().as_slice(), plain.as_slice());
+}
+
 // ---------------------------------------------------------------------------
 // Recovery
 

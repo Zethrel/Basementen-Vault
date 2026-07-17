@@ -405,7 +405,7 @@ fn encrypted_export_roundtrip_and_wrong_passphrase() {
             password: "hunter2".into(),
             url: "https://github.com".into(),
             notes: String::new(),
-            tags: vec![],
+            tags: vec!["Shop A".into(), "vip".into()],
         },
         Item::Note {
             name: "Wi-Fi".into(),
@@ -424,6 +424,8 @@ fn encrypted_export_roundtrip_and_wrong_passphrase() {
     let back = desktop_core::import_encrypted(&file, "export passphrase").unwrap();
     assert_eq!(back.len(), 2);
     assert_eq!(back[0].name(), "GitHub");
+    // Tags survive the export/import round-trip (they drive the filter facet).
+    assert_eq!(back[0].tags(), &["Shop A".to_string(), "vip".to_string()]);
 
     assert!(matches!(
         desktop_core::import_encrypted(&file, "wrong passphrase").unwrap_err(),
