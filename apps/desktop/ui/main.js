@@ -203,7 +203,59 @@ async function renderFacet() {
   bar.hidden = false;
   bar.append(tagChip("All", null));
   for (const t of tags) bar.append(tagChip(`${t.tag} (${t.count})`, t.tag));
+  // When a specific tag is selected, offer to rename or delete it everywhere.
+  if (activeTag !== null) {
+    const rename = document.createElement("button");
+    rename.className = "tagchip tag-action";
+    rename.textContent = "✎ Rename";
+    rename.addEventListener("click", () => openRenameTag(activeTag));
+    const del = document.createElement("button");
+    del.className = "tagchip tag-action";
+    del.textContent = "🗑 Delete";
+    del.addEventListener("click", () => deleteActiveTag(activeTag));
+    bar.append(rename, del);
+  }
 }
+
+function openRenameTag(tag) {
+  $("tag-rename-input").value = tag;
+  $("tag-rename-msg").textContent = "";
+  $("tag-rename-dialog").dataset.from = tag;
+  $("tag-rename-dialog").showModal();
+  $("tag-rename-input").focus();
+}
+
+async function deleteActiveTag(tag) {
+  if (!confirm(`Remove the tag "${tag}" from every item? The items themselves are kept.`)) {
+    return;
+  }
+  try {
+    await invoke("delete_tag", { tag });
+    activeTag = null;
+    await renderVault();
+  } catch (e) {
+    alert(String(e));
+  }
+}
+
+$("tag-rename-cancel").addEventListener("click", () => $("tag-rename-dialog").close());
+$("tag-rename-save").addEventListener("click", async () => {
+  const from = $("tag-rename-dialog").dataset.from;
+  const to = $("tag-rename-input").value.trim();
+  $("tag-rename-msg").textContent = "";
+  if (!to) {
+    $("tag-rename-msg").textContent = "Enter a new name.";
+    return;
+  }
+  try {
+    await invoke("rename_tag", { from, to });
+    activeTag = to;
+    $("tag-rename-dialog").close();
+    await renderVault();
+  } catch (e) {
+    $("tag-rename-msg").textContent = String(e);
+  }
+});
 
 function tagChip(label, tag) {
   const b = document.createElement("button");

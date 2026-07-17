@@ -387,6 +387,60 @@ async fn list_tags(ctx: Ctx<'_>) -> Result<Vec<TagCount>, String> {
     .await
 }
 
+/// Rename a tag across every item (`to` non-empty) or delete it (`to` = None),
+/// re-encrypting and queuing each changed item for sync. Returns how many items
+/// were touched. Matching is case-insensitive/trimmed; a rename onto an existing
+/// tag de-duplicates.
+async fn retag_all(ctx: Ctx<'_>, from: String, to: Option<String>) -> Result<usize, String> {
+    let changed = with_session(&ctx, |u| {
+        let mut count = 0usize;
+        for stored in u.vault.list() {
+            if stored.deleted || stored.item_id.starts_with("__meta/") {
+                continue;
+            }
+            let Some(content) = &stored.content else {
+                continue;
+            };
+            let Ok(plain) = u.secrets.vault_key.decrypt_item(content) else {
+                continue;
+            };
+            let Ok(mut item) = Item::from_plaintext(&plain) else {
+                continue;
+            };
+            if !item.retag(&from, to.as_deref()) {
+                continue;
+            }
+            let plain = item.to_plaintext().map_err(err)?;
+            let envelope = u
+                .secrets
+                .vault_key
+                .encrypt_item(&stored.item_id, (stored.revision + 1) as u64, &plain)
+                .map_err(err)?;
+            u.vault.stage(PendingOp::Upsert(envelope));
+            count += 1;
+        }
+        Ok(count)
+    })
+    .await?;
+    if changed > 0 {
+        sync_now(ctx).await.ok();
+    }
+    Ok(changed)
+}
+
+#[tauri::command]
+async fn rename_tag(ctx: Ctx<'_>, from: String, to: String) -> Result<usize, String> {
+    if to.trim().is_empty() {
+        return Err("the new tag name cannot be empty".into());
+    }
+    retag_all(ctx, from, Some(to)).await
+}
+
+#[tauri::command]
+async fn delete_tag(ctx: Ctx<'_>, tag: String) -> Result<usize, String> {
+    retag_all(ctx, tag, None).await
+}
+
 /// Analyze every login's password for weakness and reuse. Returns a report
 /// that carries no passwords — only per-item scores, a reuse flag, ids/names.
 #[tauri::command]
@@ -1093,6 +1147,8 @@ pub fn run() {
             lock,
             list_items,
             list_tags,
+            rename_tag,
+            delete_tag,
             vault_health,
             get_item,
             save_item,

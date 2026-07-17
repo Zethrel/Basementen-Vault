@@ -82,6 +82,36 @@ impl Item {
         }
     }
 
+    pub fn tags_mut(&mut self) -> &mut Vec<String> {
+        match self {
+            Item::Login { tags, .. } | Item::Note { tags, .. } | Item::Card { tags, .. } => tags,
+        }
+    }
+
+    /// Rename or drop a tag on this item, matching case-insensitively and
+    /// trimming. `to = Some(new)` renames (de-duplicating if `new` is already
+    /// present); `to = None` deletes. Returns whether anything changed. Used by
+    /// vault-wide tag management.
+    pub fn retag(&mut self, from: &str, to: Option<&str>) -> bool {
+        let from_norm = from.trim().to_lowercase();
+        let tags = self.tags_mut();
+        if !tags.iter().any(|t| t.trim().to_lowercase() == from_norm) {
+            return false;
+        }
+        tags.retain(|t| t.trim().to_lowercase() != from_norm);
+        if let Some(new) = to {
+            let new = new.trim();
+            if !new.is_empty()
+                && !tags
+                    .iter()
+                    .any(|t| t.trim().to_lowercase() == new.to_lowercase())
+            {
+                tags.push(new.to_string());
+            }
+        }
+        true
+    }
+
     /// Whether this item carries `tag` (case-insensitive, whitespace-trimmed).
     /// Used by the tag filter facet.
     pub fn has_tag(&self, tag: &str) -> bool {
@@ -212,6 +242,27 @@ mod tests {
         assert!(item.has_tag("  vip  ")); // trimmed
         assert!(!item.has_tag("Shop C"));
         assert_eq!(item.tags(), &["Shop A".to_string(), "vip".to_string()]);
+    }
+
+    #[test]
+    fn retag_renames_deletes_and_dedupes() {
+        let mut item = Item::Note {
+            name: "n".into(),
+            notes: String::new(),
+            tags: vec!["Shop A".into(), "vip".into()],
+        };
+        // Rename (case-insensitive match on the old name).
+        assert!(item.retag("shop a", Some("Shop B")));
+        assert_eq!(item.tags(), &["vip".to_string(), "Shop B".to_string()]);
+        // No-op when the tag isn't present.
+        assert!(!item.retag("absent", Some("x")));
+        // Delete.
+        assert!(item.retag("vip", None));
+        assert_eq!(item.tags(), &["Shop B".to_string()]);
+        // Rename onto an existing tag de-duplicates (drops old, keeps one).
+        item.tags_mut().push("keep".into());
+        assert!(item.retag("Shop B", Some("keep")));
+        assert_eq!(item.tags(), &["keep".to_string()]);
     }
 
     #[test]

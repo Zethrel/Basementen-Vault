@@ -33,6 +33,10 @@ reaches 1.0.
   weakest first, with a click-through to fix each. The analysis runs on-device
   and the report carries no passwords — only per-item scores, a reuse flag, and
   names. New `vault-core` `health` module (unit-tested) + `vault_health` command.
+- **Tag management**: with a tag selected in the filter bar, **Rename** (updates
+  it across every item, de-duplicating) and **Delete** (strips it from all items,
+  keeping the items). New `Item::retag` helper (unit-tested) +
+  `rename_tag`/`delete_tag` commands; changed items are re-encrypted and synced.
 
 ## [1.0.0-beta.5] - 2026-07-16
 
