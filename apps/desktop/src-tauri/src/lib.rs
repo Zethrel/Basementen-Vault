@@ -1086,6 +1086,17 @@ fn generate(options: GeneratorOptions) -> Result<GeneratedPassword, String> {
     })
 }
 
+#[tauri::command]
+fn generate_passphrase(
+    options: desktop_core::PassphraseOptions,
+) -> Result<GeneratedPassword, String> {
+    let (passphrase, entropy_bits) = desktop_core::generate_passphrase(&options).map_err(err)?;
+    Ok(GeneratedPassword {
+        password: passphrase.to_string(),
+        entropy_bits,
+    })
+}
+
 /// Copy a secret and clear the clipboard 30 seconds later (only if it still
 /// holds the same secret — never clobber something the user copied since).
 #[tauri::command]
@@ -1155,6 +1166,7 @@ pub fn run() {
             delete_item,
             sync_now,
             generate,
+            generate_passphrase,
             copy_secret,
             resend_verification,
             recover_start,

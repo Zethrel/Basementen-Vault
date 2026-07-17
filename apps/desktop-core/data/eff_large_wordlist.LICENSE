@@ -1,0 +1,9 @@
+The file `eff_large_wordlist.txt` is the EFF Large Wordlist for passphrases,
+created by Joseph Bonneau and the Electronic Frontier Foundation (2016).
+
+Source: https://www.eff.org/dice
+Licensed under Creative Commons Attribution 3.0 (CC BY 3.0):
+https://creativecommons.org/licenses/by/3.0/
+
+It is used verbatim as the word source for the passphrase generator. Only the
+plain words are retained (the original dice-roll numbers are omitted).

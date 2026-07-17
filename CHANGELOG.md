@@ -37,6 +37,12 @@ reaches 1.0.
   it across every item, de-duplicating) and **Delete** (strips it from all items,
   keeping the items). New `Item::retag` helper (unit-tested) +
   `rename_tag`/`delete_tag` commands; changed items are re-encrypted and synced.
+- **Passphrase generator mode**: the generator dialog gains a Password/Passphrase
+  toggle. Passphrase mode draws words uniformly from the **EFF Large Wordlist**
+  (7776 words, ~12.9 bits each; CC BY 3.0, bundled with attribution) with
+  configurable word count, separator, capitalization, and an optional appended
+  number. New `generate_passphrase` in `vault-core`'s generator (unit-tested) +
+  Tauri command.
 
 ### Build & release tooling
 

@@ -18,7 +18,7 @@ pub mod store;
 pub mod transfer;
 
 pub use api::{ApiClient, ApiError, LoginOutcome, PreloginInfo, RecoveryData, SessionInfo};
-pub use generator::{generate_password, GeneratorOptions};
+pub use generator::{generate_passphrase, generate_password, GeneratorOptions, PassphraseOptions};
 pub use health::{analyze as analyze_health, HealthEntry, HealthReport};
 pub use hibp::{password_breach_count, HibpError};
 pub use items::{Item, ItemSummary};

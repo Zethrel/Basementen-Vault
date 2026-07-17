@@ -290,20 +290,37 @@
 
   <!-- Password generator dialog -->
   <dialog id="gen-dialog">
-    <h2>Generate password</h2>
+    <h2>Generate</h2>
+    <div class="tabs">
+      <button id="gen-tab-chars" class="tab active" type="button">Password</button>
+      <button id="gen-tab-phrase" class="tab" type="button">Passphrase</button>
+    </div>
     <output id="gen-output" class="gen-output"></output>
     <div class="gen-meter"><div id="gen-meter-fill"></div></div>
     <p class="muted small"><span id="gen-entropy"></span> bits of entropy</p>
-    <label>Length <span id="gen-length-label">20</span>
-      <input id="gen-length" type="range" min="8" max="64" value="20" /></label>
-    <label class="check"><input id="gen-lower" type="checkbox" checked /> lowercase</label>
-    <label class="check"><input id="gen-upper" type="checkbox" checked /> UPPERCASE</label>
-    <label class="check"><input id="gen-digits" type="checkbox" checked /> digits</label>
-    <label class="check"><input id="gen-symbols" type="checkbox" checked /> symbols</label>
-    <label class="check"><input id="gen-ambiguous" type="checkbox" /> exclude ambiguous (Il1O0o)</label>
+
+    <div id="gen-char-opts">
+      <label>Length <span id="gen-length-label">20</span>
+        <input id="gen-length" type="range" min="8" max="64" value="20" /></label>
+      <label class="check"><input id="gen-lower" type="checkbox" checked /> lowercase</label>
+      <label class="check"><input id="gen-upper" type="checkbox" checked /> UPPERCASE</label>
+      <label class="check"><input id="gen-digits" type="checkbox" checked /> digits</label>
+      <label class="check"><input id="gen-symbols" type="checkbox" checked /> symbols</label>
+      <label class="check"><input id="gen-ambiguous" type="checkbox" /> exclude ambiguous (Il1O0o)</label>
+    </div>
+
+    <div id="gen-phrase-opts" hidden>
+      <label>Words <span id="gen-words-label">5</span>
+        <input id="gen-words" type="range" min="3" max="12" value="5" /></label>
+      <label>Separator
+        <input id="gen-separator" value="-" maxlength="3" /></label>
+      <label class="check"><input id="gen-capitalize" type="checkbox" /> Capitalize Each Word</label>
+      <label class="check"><input id="gen-number" type="checkbox" /> append a number</label>
+    </div>
+
     <div class="row">
       <button id="gen-again">Regenerate</button>
-      <button id="gen-use" class="primary">Use password</button>
+      <button id="gen-use" class="primary">Use</button>
       <button id="gen-close">Close</button>
     </div>
   </dialog>

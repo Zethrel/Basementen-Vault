@@ -593,16 +593,37 @@ $("health-close").addEventListener("click", () => healthDialog.close());
 // Generator dialog
 
 const genDialog = $("gen-dialog");
+let genMode = "chars"; // "chars" | "phrase"
+
 $("btn-generate").addEventListener("click", () => {
   genDialog.showModal();
   regenerate();
 });
+
+function setGenMode(mode) {
+  genMode = mode;
+  $("gen-tab-chars").classList.toggle("active", mode === "chars");
+  $("gen-tab-phrase").classList.toggle("active", mode === "phrase");
+  $("gen-char-opts").hidden = mode !== "chars";
+  $("gen-phrase-opts").hidden = mode !== "phrase";
+  regenerate();
+}
+$("gen-tab-chars").addEventListener("click", () => setGenMode("chars"));
+$("gen-tab-phrase").addEventListener("click", () => setGenMode("phrase"));
+
 $("gen-length").addEventListener("input", () => {
   $("gen-length-label").textContent = $("gen-length").value;
   regenerate();
 });
+$("gen-words").addEventListener("input", () => {
+  $("gen-words-label").textContent = $("gen-words").value;
+  regenerate();
+});
 for (const id of ["gen-lower", "gen-upper", "gen-digits", "gen-symbols", "gen-ambiguous"]) {
   $(id).addEventListener("change", regenerate);
+}
+for (const id of ["gen-separator", "gen-capitalize", "gen-number"]) {
+  $(id).addEventListener("input", regenerate);
 }
 $("gen-again").addEventListener("click", regenerate);
 $("gen-close").addEventListener("click", () => genDialog.close());
@@ -613,16 +634,28 @@ $("gen-use").addEventListener("click", () => {
 
 async function regenerate() {
   try {
-    const res = await invoke("generate", {
-      options: {
-        length: Number($("gen-length").value),
-        lowercase: $("gen-lower").checked,
-        uppercase: $("gen-upper").checked,
-        digits: $("gen-digits").checked,
-        symbols: $("gen-symbols").checked,
-        exclude_ambiguous: $("gen-ambiguous").checked,
-      },
-    });
+    let res;
+    if (genMode === "phrase") {
+      res = await invoke("generate_passphrase", {
+        options: {
+          words: Number($("gen-words").value),
+          separator: $("gen-separator").value || "-",
+          capitalize: $("gen-capitalize").checked,
+          include_number: $("gen-number").checked,
+        },
+      });
+    } else {
+      res = await invoke("generate", {
+        options: {
+          length: Number($("gen-length").value),
+          lowercase: $("gen-lower").checked,
+          uppercase: $("gen-upper").checked,
+          digits: $("gen-digits").checked,
+          symbols: $("gen-symbols").checked,
+          exclude_ambiguous: $("gen-ambiguous").checked,
+        },
+      });
+    }
     $("gen-output").textContent = res.password;
     const bits = Math.round(res.entropy_bits);
     $("gen-entropy").textContent = bits;
