@@ -40,6 +40,17 @@ cargo tauri android dev       # run on a connected device/emulator
 cargo tauri android build     # release .apk/.aab (set up signing first)
 ```
 
+### Test APK from CI (no local toolchain needed)
+
+The **Android test APK** workflow (`.github/workflows/android.yml`) builds a
+**debug** APK in CI. A debug build is auto-signed with the Android debug
+keystore, so it installs on any device with "install unknown apps" enabled — no
+release keystore or signing secrets required. Run it from the Actions tab
+(*workflow_dispatch*): leave the tag blank to just get a downloadable APK
+artifact, or pass a release tag (e.g. `v1.0.0-beta.6`) to also attach the APK to
+that release. This is for **testing only** — a Play Store build still needs a
+real release keystore and an `.aab` (see RELEASE_CHECKLIST §Mobile).
+
 ## iOS (requires a Mac)
 
 ```sh

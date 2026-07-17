@@ -1,0 +1,94 @@
+# Builds a DEBUG Android APK for testing. A debug build is auto-signed with the
+# Android debug keystore, so it installs on any device with "install unknown
+# apps" enabled — no release keystore or signing secrets required. This is for
+# testing the mobile app, NOT a Play Store / production artifact (that needs a
+# real keystore + an .aab; see docs/MOBILE.md and RELEASE_CHECKLIST §Mobile).
+#
+# Runs on manual dispatch: with no tag it just uploads the APK as a downloadable
+# workflow artifact (handy for ad-hoc test builds); pass a release tag to also
+# attach the APK to that release (e.g. a draft cut by release.yml).
+name: Android test APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional release tag to attach the APK to (e.g. v1.0.0-beta.6). Leave blank for an artifact-only build."
+        required: false
+        type: string
+
+permissions:
+  contents: write # upload the APK to a release when a tag is given
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: "26.3.11579264"
+
+jobs:
+  apk:
+    name: Debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK, platform and build-tools
+        run: |
+          sdkmanager --install "ndk;${NDK_VERSION}" \
+            "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Rust toolchain (with Android targets)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build debug APK
+        working-directory: apps/desktop
+        env:
+          # Non-interactive; tauri reads CI to skip prompts during init.
+          CI: "true"
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+        run: |
+          cargo tauri android init --ci
+          cargo tauri android build --debug --apk
+
+      - name: Collect APKs
+        id: collect
+        run: |
+          mkdir -p dist-apk
+          # Copy every debug APK the build produced (per-arch and/or universal).
+          find apps/desktop/src-tauri/gen/android -name '*.apk' -path '*debug*' \
+            -exec cp {} dist-apk/ \;
+          echo "Found APKs:"
+          ls -la dist-apk/
+          test -n "$(ls -A dist-apk/ 2>/dev/null)" || { echo "::error::no APK produced"; exit 1; }
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: basementen-vault-debug-apk
+          path: dist-apk/*.apk
+          if-no-files-found: error
+
+      - name: Attach APK to the release
+        if: ${{ inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release upload "$TAG" dist-apk/*.apk \
+            --repo "${GITHUB_REPOSITORY}" --clobber

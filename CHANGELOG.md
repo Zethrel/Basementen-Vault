@@ -38,6 +38,14 @@ reaches 1.0.
   keeping the items). New `Item::retag` helper (unit-tested) +
   `rename_tag`/`delete_tag` commands; changed items are re-encrypted and synced.
 
+### Build & release tooling
+
+- **Android test-APK workflow** (`.github/workflows/android.yml`): builds a
+  debug-signed, installable APK in CI (no keystore/secrets needed) — dispatch it
+  for a downloadable artifact, or pass a release tag to attach the APK to a
+  release. Makes mobile testing a download instead of a local Android toolchain
+  setup. Play Store builds still need a real keystore + `.aab`.
+
 ### Security
 
 - **Resend-verification throttle**: repeated resend requests for the same
