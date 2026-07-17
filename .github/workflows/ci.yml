@@ -45,9 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Advisories + banned/duplicate crates + source registries. The `licenses`
-      # check is intentionally left out until its allow-list (deny.toml) is
-      # confirmed against the full tree — see the note in deny.toml.
+      # Advisories + banned/duplicate crates + source registries + licenses.
+      # The license allow-list (deny.toml) is confirmed against the full tree.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check advisories bans sources
+          command: check advisories bans sources licenses

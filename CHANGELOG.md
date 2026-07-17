@@ -46,6 +46,12 @@ reaches 1.0.
 
 ### Build & release tooling
 
+- **License gate in CI**: `cargo deny check` now also enforces `licenses` (added
+  to the CI command). The allow-list was reconciled with the full dependency
+  tree — corrected our own crates' SPDX id to `AGPL-3.0-only` and allowed the
+  permissive `0BSD`, `BSL-1.0`, and `CDLA-Permissive-2.0` (Mozilla CA store)
+  found on transitive deps. A dependency introducing a non-approved license now
+  fails CI.
 - **Android test-APK workflow** (`.github/workflows/android.yml`): builds a
   debug-signed, installable APK in CI (no keystore/secrets needed) — dispatch it
   for a downloadable artifact, or pass a release tag to attach the APK to a

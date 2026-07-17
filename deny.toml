@@ -1,5 +1,5 @@
 # cargo-deny configuration — the project's supply-chain gate, run in CI
-# (`.github/workflows/ci.yml`, `cargo deny check advisories bans sources`).
+# (`.github/workflows/ci.yml`, `cargo deny check advisories bans sources licenses`).
 #
 # cargo-deny's `advisories` check queries the same RustSec advisory database as
 # `cargo audit`, so it *is* our advisory scan; it just gives one auditable place
@@ -8,8 +8,8 @@
 # Dependabot alerts for these same transitive crates are dismissed as "risk is
 # tolerable" and cross-referenced here (see docs/THREAT_MODEL.md §A7).
 #
-# The `licenses` check is configured but not gated in CI yet — enable it once the
-# allow-list is confirmed against the full dependency tree.
+# The `licenses` check IS gated in CI: every crate's license must be on the
+# allow-list below, confirmed against the full dependency tree.
 
 [advisories]
 version = 2
@@ -53,9 +53,10 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [licenses]
-# Not gated in CI yet (see header). Recorded so the intent is explicit and the
-# allow-list is ready to enable. AGPL-3.0 is our own license; the rest are the
+# Gated in CI (see header). AGPL-3.0 is our own license; the rest are the
 # permissive licenses expected across the RustCrypto / Tauri / axum stacks.
+# Every entry is either present in the tree or (AGPL-3.0) our own crates'
+# license; cargo-deny warns—but does not fail—on an unused allowance.
 version = 2
 confidence-threshold = 0.9
 allow = [
@@ -65,9 +66,16 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
-  "Unicode-DFS-2016",
   "Unicode-3.0",
   "Zlib",
   "MPL-2.0",
-  "AGPL-3.0",
+  # Our own crates' SPDX id (the current form; "AGPL-3.0" is the deprecated one).
+  "AGPL-3.0-only",
+  # Permissive licenses on individual transitive deps:
+  # - 0BSD (BSD Zero Clause): quoted_printable, adler2
+  # - BSL-1.0 (Boost): clipboard-win, error-code
+  # - CDLA-Permissive-2.0: webpki-roots (the Mozilla CA root store, as data)
+  "0BSD",
+  "BSL-1.0",
+  "CDLA-Permissive-2.0",
 ]
