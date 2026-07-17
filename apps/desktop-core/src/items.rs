@@ -76,6 +76,19 @@ impl Item {
         }
     }
 
+    pub fn tags(&self) -> &[String] {
+        match self {
+            Item::Login { tags, .. } | Item::Note { tags, .. } | Item::Card { tags, .. } => tags,
+        }
+    }
+
+    /// Whether this item carries `tag` (case-insensitive, whitespace-trimmed).
+    /// Used by the tag filter facet.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        let want = tag.trim().to_lowercase();
+        self.tags().iter().any(|t| t.trim().to_lowercase() == want)
+    }
+
     /// Serialize for encryption. `Zeroizing` so the plaintext buffer is
     /// scrubbed after the envelope is sealed.
     pub fn to_plaintext(&self) -> Result<Zeroizing<Vec<u8>>, serde_json::Error> {
@@ -132,6 +145,8 @@ pub struct ItemSummary {
     pub kind: &'static str,
     pub name: String,
     pub subtitle: String,
+    /// The item's tags, so the list can show them as labels. Not secret.
+    pub tags: Vec<String>,
 }
 
 impl ItemSummary {
@@ -160,6 +175,7 @@ impl ItemSummary {
             kind: item.kind(),
             name: item.name().to_string(),
             subtitle,
+            tags: item.tags().to_vec(),
         }
     }
 }
@@ -182,5 +198,33 @@ mod tests {
         assert_eq!(rendered, "Item::login(<redacted>)");
         assert!(!rendered.contains("hunter2"));
         assert!(!rendered.contains("private note"));
+    }
+
+    #[test]
+    fn has_tag_is_case_insensitive_and_trims() {
+        let item = Item::Note {
+            name: "Shop A creds".into(),
+            notes: String::new(),
+            tags: vec!["Shop A".into(), "vip".into()],
+        };
+        assert!(item.has_tag("Shop A"));
+        assert!(item.has_tag("shop a")); // case-insensitive
+        assert!(item.has_tag("  vip  ")); // trimmed
+        assert!(!item.has_tag("Shop C"));
+        assert_eq!(item.tags(), &["Shop A".to_string(), "vip".to_string()]);
+    }
+
+    #[test]
+    fn summary_carries_tags() {
+        let item = Item::Login {
+            name: "example.com".into(),
+            username: "alice".into(),
+            password: "secret".into(),
+            url: String::new(),
+            notes: String::new(),
+            tags: vec!["Shop A".into()],
+        };
+        let s = ItemSummary::of("id1", &item);
+        assert_eq!(s.tags, vec!["Shop A".to_string()]);
     }
 }

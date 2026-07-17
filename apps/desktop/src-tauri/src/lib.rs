@@ -302,7 +302,12 @@ async fn with_session<R>(
 }
 
 #[tauri::command]
-async fn list_items(ctx: Ctx<'_>, query: String) -> Result<Vec<ItemSummary>, String> {
+async fn list_items(
+    ctx: Ctx<'_>,
+    query: String,
+    tag: Option<String>,
+) -> Result<Vec<ItemSummary>, String> {
+    let tag = tag.filter(|t| !t.trim().is_empty());
     with_session(&ctx, |u| {
         let mut out = Vec::new();
         for stored in u.vault.list() {
@@ -318,11 +323,62 @@ async fn list_items(ctx: Ctx<'_>, query: String) -> Result<Vec<ItemSummary>, Str
             let Ok(item) = Item::from_plaintext(&plain) else {
                 continue;
             };
-            if item.matches(&query) {
+            let tag_ok = tag.as_deref().is_none_or(|t| item.has_tag(t));
+            if tag_ok && item.matches(&query) {
                 out.push(ItemSummary::of(&stored.item_id, &item));
             }
         }
         out.sort_by_key(|a| a.name.to_lowercase());
+        Ok(out)
+    })
+    .await
+}
+
+/// One tag in use, with how many (non-deleted) items carry it. Drives the
+/// filter facet; a tag disappears from this list the moment its last item is
+/// deleted, so the facet stays in sync with no separate bookkeeping.
+#[derive(serde::Serialize)]
+struct TagCount {
+    tag: String,
+    count: usize,
+}
+
+#[tauri::command]
+async fn list_tags(ctx: Ctx<'_>) -> Result<Vec<TagCount>, String> {
+    use std::collections::BTreeMap;
+    with_session(&ctx, |u| {
+        // Fold case/whitespace variants together, keeping the first-seen display
+        // form so "Shop A" and "shop a" count as one tag.
+        let mut counts: BTreeMap<String, (String, usize)> = BTreeMap::new();
+        for stored in u.vault.list() {
+            if stored.deleted || stored.item_id.starts_with("__meta/") {
+                continue;
+            }
+            let Some(content) = &stored.content else {
+                continue;
+            };
+            let Ok(plain) = u.secrets.vault_key.decrypt_item(content) else {
+                continue;
+            };
+            let Ok(item) = Item::from_plaintext(&plain) else {
+                continue;
+            };
+            for tag in item.tags() {
+                let trimmed = tag.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let entry = counts
+                    .entry(trimmed.to_lowercase())
+                    .or_insert_with(|| (trimmed.to_string(), 0));
+                entry.1 += 1;
+            }
+        }
+        let mut out: Vec<TagCount> = counts
+            .into_values()
+            .map(|(tag, count)| TagCount { tag, count })
+            .collect();
+        out.sort_by_key(|t| t.tag.to_lowercase());
         Ok(out)
     })
     .await
@@ -999,6 +1055,7 @@ pub fn run() {
             unlock,
             lock,
             list_items,
+            list_tags,
             get_item,
             save_item,
             delete_item,

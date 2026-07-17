@@ -9,6 +9,7 @@ const screens = ["screen-setup", "screen-recovery", "screen-unlock", "screen-vau
 
 let mode = "login";           // setup screen tab
 let selectedId = null;        // item currently in the editor
+let activeTag = null;         // tag filter facet selection (null = All)
 let statusTimer = null;
 
 function show(screenId) {
@@ -20,7 +21,7 @@ async function refreshStatus() {
   if (st.state === "unlocked") {
     if ($("screen-vault").hidden) {
       show("screen-vault");
-      await renderList();
+      await renderVault();
     }
   } else if (st.state === "locked") {
     if ($("screen-unlock").hidden && $("screen-setup").hidden &&
@@ -80,7 +81,7 @@ $("setup-submit").addEventListener("click", async () => {
       });
       $("setup-password").value = "";
       show("screen-vault");
-      await renderList();
+      await renderVault();
     }
   } catch (e) {
     const msg = String(e);
@@ -138,7 +139,7 @@ async function doUnlock() {
     await invoke("unlock", { password: $("unlock-password").value });
     $("unlock-password").value = "";
     show("screen-vault");
-    await renderList();
+    await renderVault();
   } catch (e) {
     $("unlock-error").textContent = String(e);
   } finally {
@@ -164,13 +165,61 @@ $("btn-sync").addEventListener("click", async () => {
   $("sync-status").textContent = s.offline
     ? "offline — changes queued"
     : `synced ↑${s.pushed} ↓${s.pulled}` + (s.conflicts ? ` ⚠${s.conflicts}` : "");
-  await renderList();
+  await renderVault();
 });
 
 $("search").addEventListener("input", () => renderList());
 
+// Refresh both the tag facet and the list — call after any change to the set
+// of items (save, delete, import, sync, unlock), so the facet stays in sync.
+async function renderVault() {
+  await renderFacet();
+  await renderList();
+}
+
+// Build the clickable tag filter from the tags currently in use. It appears
+// only when at least one tag exists, and a tag drops off automatically once its
+// last item is gone (the server-side count reaches zero).
+async function renderFacet() {
+  let tags;
+  try {
+    tags = await invoke("list_tags");
+  } catch {
+    tags = [];
+  }
+  // If the active tag no longer exists (last item deleted/retagged), fall back
+  // to All so the list doesn't silently show nothing.
+  if (activeTag !== null && !tags.some((t) => t.tag === activeTag)) {
+    activeTag = null;
+  }
+  const bar = $("tag-filter");
+  bar.textContent = "";
+  if (tags.length === 0) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  bar.append(tagChip("All", null));
+  for (const t of tags) bar.append(tagChip(`${t.tag} (${t.count})`, t.tag));
+}
+
+function tagChip(label, tag) {
+  const b = document.createElement("button");
+  b.className = "tagchip" + (tag === activeTag ? " active" : "");
+  b.textContent = label;
+  b.addEventListener("click", () => {
+    activeTag = tag;
+    renderFacet();
+    renderList();
+  });
+  return b;
+}
+
 async function renderList() {
-  const items = await invoke("list_items", { query: $("search").value });
+  const items = await invoke("list_items", {
+    query: $("search").value,
+    tag: activeTag,
+  });
   const ul = $("item-list");
   ul.textContent = "";
   for (const it of items) {
@@ -187,6 +236,17 @@ async function renderList() {
     sub.className = "sub";
     sub.textContent = it.subtitle;
     li.append(kind, name, sub);
+    if (it.tags && it.tags.length) {
+      const tagWrap = document.createElement("span");
+      tagWrap.className = "tags";
+      for (const t of it.tags) {
+        const chip = document.createElement("span");
+        chip.className = "tag";
+        chip.textContent = t;
+        tagWrap.append(chip);
+      }
+      li.append(tagWrap);
+    }
     li.addEventListener("click", () => openItem(it.item_id));
     ul.append(li);
   }
@@ -289,7 +349,7 @@ $("editor").addEventListener("submit", async (e) => {
     if (!item.name) throw "name is required";
     const wasNew = selectedId === null;
     await invoke("save_item", { itemId: selectedId, item });
-    await renderList();
+    await renderFacet(); // a new tag may have appeared; startNewItem redraws the list
     // Reset to a blank new-item form. This is the key fix: keeping the saved
     // item bound to the editor meant a following Save (e.g. after switching
     // Type) overwrote it, silently dropping the previous type's fields.
@@ -309,7 +369,7 @@ $("btn-delete").addEventListener("click", async () => {
   $("editor").hidden = true;
   $("detail-empty").hidden = false;
   showDetailPane(false);
-  await renderList();
+  await renderVault();
 });
 
 $("btn-reveal").addEventListener("click", () => {
@@ -676,7 +736,7 @@ $("btn-import").addEventListener("click", async () => {
     const res = await invoke("import_vault", { passphrase: pass.length ? pass : null });
     $("xfer-msg").textContent = `Imported ${res.imported} item(s).`;
     $("xfer-passphrase").value = "";
-    await renderList();
+    await renderVault();
   } catch (e) {
     $("xfer-msg").textContent = String(e);
   }

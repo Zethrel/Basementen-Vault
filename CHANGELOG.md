@@ -13,7 +13,17 @@ reaches 1.0.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Tag filter facet**: the vault list gains a row of tag chips built from the
+  tags currently in use ("All" + one per tag, with counts). Clicking one filters
+  the list to that tag, and search narrows further within it. The chips are
+  derived live from your items (new `list_tags` command) — a tag appears the
+  moment you first use it and disappears when its last item is deleted, with no
+  separate list to maintain. Tags also now show as small labels on each list
+  row. Because tags live inside the end-to-end-encrypted item and the facet is
+  computed on-device, the server never sees them. Enables e.g. grouping stored
+  credentials per client and filtering to one at a time.
 
 ## [1.0.0-beta.5] - 2026-07-16
 
