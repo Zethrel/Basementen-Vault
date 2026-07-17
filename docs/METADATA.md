@@ -14,7 +14,7 @@ the actual schema (`server/vault-server/migrations/`).
 | Account + verification timestamps | `accounts.created_at`, `email_verified_at` | Coarse activity signal. |
 | KDF parameters | `accounts.kdf_params` | Public tuning values, not secret. |
 | **Number of vault items** | row count in `vault_items` | A genuine leak — see below. |
-| Size *bucket* of each item | `vault_items.content` ciphertext length | **Mitigated:** v2 items pad plaintext to 256-byte buckets before encryption, so the length reveals only which bucket an item falls in, not its exact size. Every ordinary login/card shares one length; a long note still leaks its size to 256-byte granularity. (v1 items predating this remain unpadded until their next write; see below.) |
+| Size *bucket* of each item | `vault_items.content` ciphertext length | **Mitigated:** v2 items pad plaintext before encryption, so the length reveals only which bucket an item falls in. Bucketing is *graduated*: every ordinary login/card shares one 256-byte bucket, and larger items round up to a power-of-two block that grows with size, so a long note reveals its size only coarsely (not to 256-byte granularity). (v1 items predating this remain unpadded until their next write; see below.) |
 | Per-item modification cadence | `vault_items.updated_at`, `seq`, `revision` | Reveals *when* and *how often* items change, not what. |
 | Item identifiers | `vault_items.item_id` (UUIDv7) | Random v7 UUIDs; the embedded timestamp reveals item *creation* time. |
 | Deletions | `vault_items.deleted` tombstones | Reveals that an item existed and was deleted. |
@@ -36,14 +36,19 @@ the actual schema (`server/vault-server/migrations/`).
 ## Recommendations (tracked, not yet implemented)
 
 1. **Pad item plaintext before encryption** — **DONE.** Shipped as
-   `EncryptedItem` **v2**: plaintext is length-prefixed and zero-padded to the
-   next 256-byte bucket before encryption, so ciphertext length no longer
-   approximates content length. The version is authenticated in the AEAD AAD
-   (I12), and v1 (unpadded) records still decrypt, migrating to v2 on their
-   next write. Format spec in `CRYPTOGRAPHIC_INVARIANTS.md` §Item record
-   format; guards in `item::tests` + `crypto_flows::item_ciphertext_length_is_bucketed`.
-   A larger fixed floor or exponential bucketing could hide big notes better —
-   a future v3 option, not needed for v1.
+   `EncryptedItem` **v2**: plaintext is length-prefixed and zero-padded before
+   encryption, so ciphertext length no longer approximates content length. The
+   bucketing is *graduated* — small items collapse to a single 256-byte bucket,
+   larger items round up to a power-of-two block that grows with their size
+   (`2^(⌊log2 len⌋−4)`, floored at 256), so the number of distinct observable
+   lengths grows only ~logarithmically and big notes leak their size only
+   coarsely, with overhead ≤ ~1/16. Blocks stay 256-multiples, so small/mid
+   items are unchanged from the original fixed-256 scheme and old records still
+   decrypt (decrypt reads the length prefix and ignores padding — no
+   format-version bump). The version is authenticated in the AEAD AAD (I12), and
+   v1 (unpadded) records still decrypt, migrating to v2 on their next write.
+   Format spec in `CRYPTOGRAPHIC_INVARIANTS.md` §Item record format; guards in
+   `item::tests` + `crypto_flows::item_ciphertext_length_is_bucketed`.
 2. **Make `device_name` opt-in** in the app UI rather than defaulting to the
    hostname, for users who prefer not to record it.
 3. **Document proxy log hygiene** in `SELF_HOSTING.md` for IP-privacy-

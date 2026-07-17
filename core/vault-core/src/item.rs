@@ -11,23 +11,46 @@ use crate::keys::VaultKey;
 const NONCE_LEN: usize = 24;
 const AAD_CONTEXT: &[u8] = b"basementen-vault/v1/item";
 
-/// Padding block for v2 items. Plaintext is padded to a multiple of this so
-/// the ciphertext length reveals only which bucket the item falls in, not its
-/// exact size (metadata hardening; see `docs/METADATA.md`). 256 bytes collapses
-/// every ordinary login/card into a single length while bounding overhead to
-/// under one block.
+/// Minimum padding block for v2 items, and the single bucket every small item
+/// collapses into. 256 bytes hides every ordinary login/card behind one length
+/// while bounding small-item overhead to under one block (metadata hardening;
+/// see `docs/METADATA.md`).
 const PAD_BLOCK: usize = 256;
 /// Bytes of little-endian length prefix in the padded plaintext.
 const LEN_PREFIX: usize = 4;
 
+/// Padded length for a `total`-byte (prefix + plaintext) buffer under a
+/// **graduated** bucket schedule: small items collapse to a single
+/// [`PAD_BLOCK`] bucket, while larger items round up to a block that grows with
+/// their magnitude — `2^(⌊log2 total⌋ − 4)`, floored at [`PAD_BLOCK`].
+///
+/// This tightens the residual metadata leak the old fixed-256 scheme left on
+/// large items (`docs/THREAT_MODEL.md` — item-size metadata): the number of
+/// distinct observable lengths now grows only ~logarithmically with size (a
+/// long note reveals its size only to a coarse power-of-two block, not to
+/// 256 bytes), while padding overhead stays ≤ ~1/16 above the small-item floor.
+/// Every block is a power-of-two multiple of [`PAD_BLOCK`], so small/mid items
+/// bucket exactly as before — no regression, and (crucially) decrypt reads only
+/// the length prefix and ignores padding, so this schedule can change with no
+/// format-version bump and old fixed-256 v2 records still decrypt.
+fn bucketed_len(total: usize) -> usize {
+    let block = if total <= PAD_BLOCK {
+        PAD_BLOCK
+    } else {
+        let msb = (usize::BITS - 1 - total.leading_zeros()) as usize; // ⌊log2 total⌋
+        PAD_BLOCK.max(1usize << msb.saturating_sub(4))
+    };
+    total.next_multiple_of(block)
+}
+
 /// Wrap plaintext in the v2 padded layout: `u32-LE real length ‖ plaintext ‖
-/// zero padding` rounded up to the next [`PAD_BLOCK`] multiple (at least one
-/// block). Returned in a `Zeroizing` buffer — it is plaintext.
+/// zero padding`, sized by [`bucketed_len`]. Returned in a `Zeroizing` buffer —
+/// it is plaintext.
 fn pad_plaintext(plaintext: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     if plaintext.len() > u32::MAX as usize {
         return Err(CryptoError::Malformed("item plaintext too large".into()));
     }
-    let padded_len = (LEN_PREFIX + plaintext.len()).next_multiple_of(PAD_BLOCK);
+    let padded_len = bucketed_len(LEN_PREFIX + plaintext.len());
     let mut buf = Zeroizing::new(Vec::with_capacity(padded_len));
     buf.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
     buf.extend_from_slice(plaintext);
@@ -191,6 +214,51 @@ mod tests {
             let padded = pad_plaintext(&data).unwrap();
             assert_eq!(padded.len() % PAD_BLOCK, 0, "padded to a block multiple");
             assert!(padded.len() >= PAD_BLOCK, "at least one block");
+            assert_eq!(
+                unpad_plaintext(&padded).unwrap().as_slice(),
+                data.as_slice()
+            );
+        }
+    }
+
+    #[test]
+    fn graduated_bucketing_properties() {
+        // Small items all collapse to the single 256 bucket (no size signal).
+        for total in [1usize, 100, 200, 256] {
+            assert_eq!(bucketed_len(total), 256);
+        }
+        // Mid items bucket exactly as the old fixed-256 scheme did (no regression).
+        assert_eq!(bucketed_len(257), 512);
+        assert_eq!(bucketed_len(300), 512);
+        assert_eq!(bucketed_len(1000), 1024);
+        assert_eq!(bucketed_len(4096), 4096);
+
+        // Every bucket is a multiple of 256, is ≥ the input (plaintext fits),
+        // never shrinks as the item grows, and adds ≤ ~1/16 overhead on large
+        // items (a long note reveals its size only coarsely).
+        let mut prev = 0;
+        for total in (256..200_000).step_by(97) {
+            let b = bucketed_len(total);
+            assert!(b >= total, "bucket must fit the plaintext");
+            assert_eq!(b % PAD_BLOCK, 0, "bucket is a 256 multiple");
+            assert!(b >= prev, "bucketing must be monotonic");
+            prev = b;
+            // Overhead bound: block ≤ total/16 above the floor, so padded is
+            // within one block; comfortably under 2x and ~6% for large sizes.
+            assert!(b <= total + total / 16 + PAD_BLOCK);
+        }
+
+        // Large items get coarse (power-of-two) blocks, not 256-byte precision.
+        assert_eq!(bucketed_len(50_000), 51_200); // block 2048 → multiple of 2048
+        assert_eq!(bucketed_len(50_000) % 2048, 0);
+    }
+
+    #[test]
+    fn large_item_padding_roundtrips() {
+        for len in [4096usize, 10_000, 50_000, 131_072] {
+            let data = vec![0x5au8; len];
+            let padded = pad_plaintext(&data).unwrap();
+            assert!(padded.len() >= LEN_PREFIX + len);
             assert_eq!(
                 unpad_plaintext(&padded).unwrap().as_slice(),
                 data.as_slice()

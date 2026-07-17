@@ -54,6 +54,15 @@ reaches 1.0.
 
 ### Security
 
+- **Tighter item-size padding**: v2 item padding moves from fixed 256-byte
+  buckets to a **graduated** schedule — small items still collapse to one
+  256-byte bucket, but larger items round up to a power-of-two block that grows
+  with their size, so a long note now reveals its size only coarsely instead of
+  to 256-byte granularity (overhead stays ≤ ~1/16). Blocks remain 256-multiples,
+  so small/mid items bucket exactly as before and **old records still decrypt**
+  — no format-version bump (decrypt reads the length prefix and ignores
+  padding). Closes the residual item-size metadata leak noted in the threat
+  model.
 - **Resend-verification throttle**: repeated resend requests for the same
   account within a 60-second cooldown are silently coalesced — no extra e-mail
   or token — limiting inbox spam and token churn. Implemented as a silent skip
