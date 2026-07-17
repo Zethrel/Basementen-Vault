@@ -24,6 +24,10 @@ reaches 1.0.
   row. Because tags live inside the end-to-end-encrypted item and the facet is
   computed on-device, the server never sees them. Enables e.g. grouping stored
   credentials per client and filtering to one at a time.
+- **Tag autocomplete** in the item editor: typing in the Tags field suggests
+  existing tags (keyboard-navigable, click or Enter to accept), so reusing a tag
+  like "Shop A" doesn't accidentally spawn near-duplicates ("shop a", "ShopA")
+  that would fragment the filter.
 
 ## [1.0.0-beta.5] - 2026-07-16
 

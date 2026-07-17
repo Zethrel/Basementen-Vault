@@ -169,7 +169,10 @@
             </div>
           </div>
           <label>Notes <textarea id="f-notes" rows="5"></textarea></label>
-          <label>Tags <span class="muted small">(comma separated)</span> <input id="f-tags" /></label>
+          <label class="tags-field">Tags <span class="muted small">(comma separated)</span>
+            <input id="f-tags" autocomplete="off" />
+            <ul id="tag-suggest" class="tag-suggest" hidden></ul>
+          </label>
           <div class="row">
             <button type="submit" class="primary">Save</button>
             <button type="button" id="btn-delete" class="danger" hidden>Delete</button>

@@ -10,6 +10,7 @@ const screens = ["screen-setup", "screen-recovery", "screen-unlock", "screen-vau
 let mode = "login";           // setup screen tab
 let selectedId = null;        // item currently in the editor
 let activeTag = null;         // tag filter facet selection (null = All)
+let knownTags = [];           // distinct tags in use, for editor autocomplete
 let statusTimer = null;
 
 function show(screenId) {
@@ -187,6 +188,7 @@ async function renderFacet() {
   } catch {
     tags = [];
   }
+  knownTags = tags.map((t) => t.tag); // feed the editor's tag autocomplete
   // If the active tag no longer exists (last item deleted/retagged), fall back
   // to All so the list doesn't silently show nothing.
   if (activeTag !== null && !tags.some((t) => t.tag === activeTag)) {
@@ -267,6 +269,7 @@ function clearEditor() {
   }
   $("editor-error").textContent = "";
   $("editor-status").textContent = "";
+  $("tag-suggest").hidden = true;
 }
 
 // Briefly confirm a save. Since a save now clears the form back to a blank
@@ -375,6 +378,97 @@ $("btn-delete").addEventListener("click", async () => {
 $("btn-reveal").addEventListener("click", () => {
   const f = $("f-password");
   f.type = f.type === "password" ? "text" : "password";
+});
+
+// --- Tag autocomplete (editor) ---
+// Suggests existing tags as you type into the comma-separated Tags field, so
+// reusing "Shop A" doesn't accidentally create "shop a" / "ShopA" duplicates.
+// `knownTags` is kept fresh by renderFacet.
+
+// Split the field into the committed prefix (everything up to the last comma)
+// and the tag fragment currently being typed after it.
+function tagFieldParts() {
+  const val = $("f-tags").value;
+  const lastComma = val.lastIndexOf(",");
+  return {
+    before: lastComma === -1 ? "" : val.slice(0, lastComma + 1),
+    seg: val.slice(lastComma + 1).trim(),
+  };
+}
+
+function tagsAlreadyInField() {
+  return new Set(
+    $("f-tags").value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
+  );
+}
+
+function updateTagSuggest() {
+  const box = $("tag-suggest");
+  const { seg } = tagFieldParts();
+  const already = tagsAlreadyInField();
+  const q = seg.toLowerCase();
+  let matches = knownTags.filter((t) => !already.has(t.toLowerCase()));
+  if (q) matches = matches.filter((t) => t.toLowerCase().includes(q));
+  matches = matches.slice(0, 8);
+  box.textContent = "";
+  if (matches.length === 0) {
+    box.hidden = true;
+    return;
+  }
+  matches.forEach((t, i) => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    if (i === 0) li.className = "active";
+    // mousedown (not click) so it fires before the input's blur hides the box.
+    li.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      acceptTag(t);
+    });
+    box.append(li);
+  });
+  box.hidden = false;
+}
+
+function acceptTag(tag) {
+  const { before } = tagFieldParts();
+  $("f-tags").value = (before ? before + " " : "") + tag + ", ";
+  $("tag-suggest").hidden = true;
+  $("f-tags").focus();
+}
+
+function setActiveSuggest(items, i) {
+  items.forEach((li, j) => li.classList.toggle("active", j === i));
+}
+
+$("f-tags").addEventListener("input", updateTagSuggest);
+$("f-tags").addEventListener("focus", updateTagSuggest);
+$("f-tags").addEventListener("blur", () => {
+  // Delay so a mousedown on a suggestion still registers.
+  setTimeout(() => ($("tag-suggest").hidden = true), 120);
+});
+$("f-tags").addEventListener("keydown", (e) => {
+  const box = $("tag-suggest");
+  if (box.hidden) return; // let Enter submit the form as usual
+  const items = [...box.querySelectorAll("li")];
+  const idx = items.findIndex((li) => li.classList.contains("active"));
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    setActiveSuggest(items, (idx + 1) % items.length);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    setActiveSuggest(items, (idx - 1 + items.length) % items.length);
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    // Accept the highlighted suggestion instead of submitting the form.
+    if (idx >= 0) {
+      e.preventDefault();
+      acceptTag(items[idx].textContent);
+    } else {
+      box.hidden = true;
+    }
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    box.hidden = true;
+  }
 });
 
 document.querySelectorAll("button.copy").forEach((btn) => {

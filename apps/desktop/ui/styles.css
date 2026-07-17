@@ -105,6 +105,18 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 0.65rem; color: var(--muted);
   border: 1px solid var(--border); border-radius: 999px; padding: 0 0.4rem;
 }
+.tags-field { position: relative; }
+.tag-suggest {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 20;
+  margin: 0.2rem 0 0; padding: 0.2rem; list-style: none;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  max-height: 168px; overflow-y: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.tag-suggest li {
+  padding: 0.35rem 0.6rem; border-radius: 6px; cursor: pointer;
+  color: var(--text); font-size: 0.85rem;
+}
+.tag-suggest li:hover, .tag-suggest li.active { background: var(--panel-2); }
 
 .split { flex: 1; display: flex; min-height: 0; }
 .item-list {
