@@ -382,6 +382,45 @@ async fn resend_verification_issues_a_fresh_working_link() {
 }
 
 #[tokio::test]
+async fn resend_verification_is_throttled_within_cooldown() {
+    let server = test_server().await;
+
+    // Registration already sends one verification e-mail.
+    let (_reg, body) = client_bundle(EMAIL, PASSWORD);
+    let (status, _) = server
+        .request("POST", "/api/v1/accounts/register", None, Some(body))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let verify_mails = |s: &TestServer| {
+        s.state
+            .mailer
+            .sent()
+            .iter()
+            .filter(|m| m.to == EMAIL && m.subject.contains("verify your e-mail"))
+            .count()
+    };
+    assert_eq!(verify_mails(&server), 1);
+
+    // An immediate resend is coalesced: same OK response, but no second e-mail.
+    let (status, body) = server
+        .request(
+            "POST",
+            "/api/v1/accounts/resend-verification",
+            None,
+            Some(json!({ "email": EMAIL })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ok");
+    assert_eq!(
+        verify_mails(&server),
+        1,
+        "a resend within the cooldown must not send another e-mail"
+    );
+}
+
+#[tokio::test]
 async fn resend_verification_is_anti_enumeration() {
     let server = test_server().await;
 

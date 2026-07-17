@@ -38,6 +38,13 @@ reaches 1.0.
   keeping the items). New `Item::retag` helper (unit-tested) +
   `rename_tag`/`delete_tag` commands; changed items are re-encrypted and synced.
 
+### Security
+
+- **Resend-verification throttle**: repeated resend requests for the same
+  account within a 60-second cooldown are silently coalesced — no extra e-mail
+  or token — limiting inbox spam and token churn. Implemented as a silent skip
+  (not a 429) so it never reveals whether the address has a pending account.
+
 ## [1.0.0-beta.5] - 2026-07-16
 
 Refreshes the entire crypto dependency stack to its current upstream generation,

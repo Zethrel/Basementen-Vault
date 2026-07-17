@@ -10,6 +10,12 @@ use crate::{db, security};
 
 const VERIFY_TOKEN_TTL_SECS: i64 = 15 * 60;
 
+/// Minimum spacing between verification e-mails for one account. A resend
+/// inside this window is silently coalesced (no new e-mail/token) — this
+/// throttles inbox spam and token churn without an error response that would
+/// betray the account's existence.
+const RESEND_COOLDOWN_SECS: i64 = 60;
+
 #[derive(Deserialize)]
 pub struct RegisterRequest {
     pub email: String,
@@ -163,11 +169,36 @@ pub async fn resend_verification(
 
     match db::account_by_email(&state.db, &email).await? {
         Some(account) if account.email_verified_at.is_none() => {
-            send_verification_email(&state, account.id, &account.email).await?;
+            // Coalesce rapid resends: skip if a verification e-mail went out
+            // within the cooldown. Anti-enumeration-safe — the response is the
+            // same generic OK whether we sent or skipped.
+            if !recently_sent_verification(&state, account.id).await? {
+                send_verification_email(&state, account.id, &account.email).await?;
+            }
         }
         _ => security::failure_delay().await,
     }
     Ok(Json(response))
+}
+
+/// Whether a verification e-mail for this account was issued within the resend
+/// cooldown. Derived from the newest token's expiry (created = expiry − TTL),
+/// so no extra column is needed.
+async fn recently_sent_verification(state: &AppState, account_id: i64) -> Result<bool, ApiError> {
+    let newest_expiry: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(expires_at) FROM email_tokens
+         WHERE account_id = ? AND purpose = 'verify_email'",
+    )
+    .bind(account_id)
+    .fetch_one(&state.db)
+    .await?;
+    Ok(match newest_expiry {
+        Some(expiry) => {
+            let created = expiry - VERIFY_TOKEN_TTL_SECS;
+            security::now() - created < RESEND_COOLDOWN_SECS
+        }
+        None => false,
+    })
 }
 
 async fn send_verification_email(
